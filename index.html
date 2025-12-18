@@ -16,10 +16,8 @@
             background: rgba(255,255,255,0.8); z-index: 9999;
             display: flex; justify-content: center; align-items: center;
         }
-        .badge-type { position: absolute; top: 10px; right: 10px; }
+        .badge-type { position: absolute; top: 10px; right: 10px; font-size: 0.9rem; padding: 0.5em 0.8em; }
         .login-container { max-width: 400px; margin: 100px auto; padding: 20px; }
-        
-        /* 样式微调 */
         .location-title { font-size: 1rem; font-weight: 600; color: #212529; margin-bottom: 2px; }
         .location-subtitle { font-size: 0.85rem; color: #6c757d; font-family: monospace; }
     </style>
@@ -50,7 +48,7 @@
             <div class="container">
                 <span class="navbar-brand mb-0 h1">
                     灾害监测与报告系统 
-                    <span class="badge bg-primary text-white ms-2" style="font-size:0.7rem;">v3.2</span>
+                    <span class="badge bg-white text-primary ms-2" style="font-size:0.7rem;">v3.3</span>
                 </span>
                 <div class="d-flex align-items-center">
                     <span class="text-white me-3 small">欢迎, {{ currentUser }}</span>
@@ -80,8 +78,10 @@
                 <div class="col-md-4 col-sm-6" v-for="report in reports" :key="report.id">
                     <div class="card h-100 shadow-sm border-0">
                         <img :src="getImageUrl(report.imagePath)" class="card-img-top" @error="handleImageError">
-                        <span class="badge bg-danger badge-type">{{ report.type || '未分类' }}</span>
                         
+                        <span :class="['badge', 'badge-type', getLevelConfig(report).class]">
+                            {{ getLevelConfig(report).text }}
+                        </span>
                         <div class="card-body">
                             <h5 class="card-title text-truncate mb-3">{{ report.title }}</h5>
                             
@@ -148,52 +148,59 @@
             handleImageError(e) { e.target.src = 'https://via.placeholder.com/400x200'; },
             formatDate(d) { return d ? new Date(d).toLocaleString('zh-CN', {hour12:false}) : ''; },
             
-            // --- 终极修复：先判断类型，再解析 ---
+            // --- 位置解析 (保持 v3.2 逻辑) ---
             parseLocation(locData) {
                 if (!locData) return { isJson: false, title: '未知地点', subtitle: '' };
-
                 let jsonObj = null;
-
-                // 1. 如果它已经是对象了 (关键修复!)
-                if (typeof locData === 'object') {
-                    jsonObj = locData;
-                } 
-                // 2. 如果是字符串，才去尝试解析
+                if (typeof locData === 'object') { jsonObj = locData; } 
                 else if (typeof locData === 'string') {
                     try { jsonObj = JSON.parse(locData.trim()); } catch(e) {}
-                    
-                    // 正则保底
                     if (!jsonObj) {
                         try {
                             const descMatch = locData.match(/"description"\s*:\s*"([^"]+)"/);
                             const latMatch = locData.match(/"latitude"\s*:\s*([0-9.]+)/);
                             const longMatch = locData.match(/"longitude"\s*:\s*([0-9.]+)/);
                             if (descMatch || (latMatch && longMatch)) {
-                                jsonObj = {
-                                    description: descMatch ? descMatch[1] : null,
-                                    latitude: latMatch ? latMatch[1] : null,
-                                    longitude: longMatch ? longMatch[1] : null
-                                };
+                                jsonObj = { description: descMatch ? descMatch[1] : null, latitude: latMatch ? latMatch[1] : null, longitude: longMatch ? longMatch[1] : null };
                             }
                         } catch(e) {}
                     }
                 }
-
-                // 3. 格式化输出
                 if (jsonObj) {
                     const title = jsonObj.description || '无位置描述';
                     let subtitle = '';
-                    if (jsonObj.latitude && jsonObj.longitude) {
-                        // 格式：经纬度：纬度,经度
-                        subtitle = `经纬度：${jsonObj.latitude},${jsonObj.longitude}`;
-                    }
+                    if (jsonObj.latitude && jsonObj.longitude) { subtitle = `经纬度：${jsonObj.latitude},${jsonObj.longitude}`; }
                     return { isJson: true, title: title, subtitle: subtitle };
                 }
+                const str = String(locData);
+                return { isJson: false, title: str.length > 30 ? str.substring(0,30)+'...' : str, subtitle: '' };
+            },
 
-                // 4. 彻底失败
-                const str = String(locData); // 确保转为字符串显示
-                const displayTitle = str.length > 30 ? str.substring(0,30)+'...' : str;
-                return { isJson: false, title: displayTitle, subtitle: '' };
+            // --- 新增：严重等级样式映射 ---
+            getLevelConfig(report) {
+                // 1. 优先读取 'level' 字段，如果不存在则读取 'type'
+                const rawLevel = report.level || report.type || '未分级';
+                
+                // 2. 匹配规则
+                // 严重/紧急 -> 红色
+                if (/严重|紧急|Danger|Severe/i.test(rawLevel)) {
+                    return { class: 'bg-danger', text: rawLevel };
+                }
+                // 较重/重要 -> 橙色 (字体深色更易读)
+                if (/较重|重要|High|Warning/i.test(rawLevel)) {
+                    return { class: 'bg-warning text-dark', text: rawLevel };
+                }
+                // 一般/普通 -> 蓝色
+                if (/一般|普通|Normal|Medium/i.test(rawLevel)) {
+                    return { class: 'bg-primary', text: rawLevel };
+                }
+                // 轻微/恢复/正常 -> 绿色
+                if (/轻微|恢复|Low|Minor/i.test(rawLevel)) {
+                    return { class: 'bg-success', text: rawLevel };
+                }
+                
+                // 3. 默认 -> 灰色
+                return { class: 'bg-secondary', text: rawLevel };
             }
         }
     }).mount('#app');
