@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>灾害报告监控中心</title>
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+    <style>
+        body { background-color: #f8f9fa; }
+        .card-img-top {
+            height: 200px;
+            object-fit: cover;
+        }
+        .stats-card {
+            min-height: 300px;
+        }
+        .loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.8); z-index: 9999;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .badge-type {
+            position: absolute; top: 10px; right: 10px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <div v-if="loading" class="loading-overlay">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">加载中...</span>
+        </div>
+    </div>
+
+    <nav class="navbar navbar-dark bg-primary mb-4">
+        <div class="container">
+            <span class="navbar-brand mb-0 h1">灾害监测与报告系统</span>
+            <span class="text-white">实时监控面板</span>
+        </div>
+    </nav>
+
+    <div class="container">
+        
+        <div v-if="error" class="alert alert-danger" role="alert">
+            {{ error }}
+            <br>
+            <small>如果连接失败，请检查是否已在浏览器中信任了自签名证书 (https://localhost:3000/api/reports)。</small>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card stats-card shadow-sm">
+                    <div class="card-body text-center">
+                        <h5 class="card-title text-muted">总报告数</h5>
+                        <h1 class="display-1 fw-bold text-primary">{{ reports.length }}</h1>
+                        <p class="text-secondary">截止当前时间</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <div class="card stats-card shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title">灾害类型分布</h5>
+                        <canvas id="typeChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h3 class="mb-3 border-start border-4 border-primary ps-3">最新报告列表</h3>
+        
+        <div v-if="reports.length === 0 && !loading" class="text-center py-5 text-muted">
+            暂无灾害报告数据
+        </div>
+
+        <div class="row g-4">
+            <div class="col-md-4 col-sm-6" v-for="report in reports" :key="report.id">
+                <div class="card h-100 shadow-sm border-0">
+                    <img :src="getImageUrl(report.imagePath)" 
+                         class="card-img-top" 
+                         alt="现场图片"
+                         @error="handleImageError">
+                    
+                    <span class="badge bg-danger badge-type">{{ report.type || '未分类' }}</span>
+
+                    <div class="card-body">
+                        <h5 class="card-title text-truncate">{{ report.title }}</h5>
+                        <h6 class="card-subtitle mb-2 text-muted">
+                            <i class="bi bi-geo-alt"></i> {{ report.location || '未知地点' }}
+                        </h6>
+                        <p class="card-text small text-secondary" style="height: 40px; overflow: hidden;">
+                            {{ report.description || '暂无详细描述...' }}
+                        </p>
+                    </div>
+                    <div class="card-footer bg-white border-top-0 d-flex justify-content-between align-items-center">
+                        <small class="text-muted">{{ formatDate(report.date) }}</small>
+                        <small class="text-primary fw-bold">上报人: {{ report.username || '匿名' }}</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const { createApp } = Vue;
+
+    createApp({
+        data() {
+            return {
+                // 配置你的后端 API 地址 (HTTPS)
+                apiBaseUrl: 'https://localhost:3000', 
+                reports: [],
+                loading: true,
+                error: null,
+                chartInstance: null
+            }
+        },
+        mounted() {
+            this.fetchReports();
+        },
+        methods: {
+            async fetchReports() {
+                try {
+                    const response = await fetch(`${this.apiBaseUrl}/api/reports`);
+                    if (!response.ok) throw new Error('网络响应异常');
+                    
+                    const data = await response.json();
+                    this.reports = data;
+                    
+                    // 数据加载完成后，渲染图表
+                    this.$nextTick(() => {
+                        this.renderChart();
+                    });
+                } catch (err) {
+                    this.error = "无法连接到服务器: " + err.message;
+                    console.error(err);
+                } finally {
+                    this.loading = false;
+                }
+            },
+            getImageUrl(path) {
+                if (!path) return 'https://via.placeholder.com/400x200?text=No+Image';
+                // 确保路径拼接正确
+                return `${this.apiBaseUrl}${path}`;
+            },
+            handleImageError(e) {
+                e.target.src = 'https://via.placeholder.com/400x200?text=Image+Error';
+            },
+            formatDate(dateString) {
+                if (!dateString) return '';
+                // 简单的日期格式化
+                const date = new Date(dateString);
+                return date.toLocaleString('zh-CN', { hour12: false });
+            },
+            renderChart() {
+                // 1. 统计各类型的数量
+                const typeCounts = {};
+                this.reports.forEach(r => {
+                    const type = r.type || '其他';
+                    typeCounts[type] = (typeCounts[type] || 0) + 1;
+                });
+
+                const ctx = document.getElementById('typeChart');
+                if (!ctx) return;
+
+                // 2. 配置 Chart.js
+                this.chartInstance = new Chart(ctx, {
+                    type: 'doughnut', // 甜甜圈图
+                    data: {
+                        labels: Object.keys(typeCounts),
+                        datasets: [{
+                            label: '报告数量',
+                            data: Object.values(typeCounts),
+                            backgroundColor: [
+                                '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40'
+                            ],
+                            hoverOffset: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false, // 允许调整大小
+                        plugins: {
+                            legend: { position: 'right' }
+                        }
+                    }
+                });
+            }
+        }
+    }).mount('#app');
+</script>
+
+</body>
+</html>
