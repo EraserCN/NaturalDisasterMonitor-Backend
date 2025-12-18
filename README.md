@@ -62,7 +62,7 @@ The project aims to deliver a straightforward backend solution for handling disa
 
 Run the following command:
 ```bash
-npm start
+sudo npm start
 ```
 
 The server will start on `http://localhost:3000`.
