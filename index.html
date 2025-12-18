@@ -36,14 +36,12 @@
     <div v-if="!isLoggedIn" class="container">
         <div class="card login-container shadow">
             <div class="card-body">
-                <h4 class="card-title text-center mb-4 text-primary">
-                    {{ isRegisterMode ? '注册管理员账号' : '登录监控中心' }}
-                </h4>
+                <h4 class="card-title text-center mb-4 text-primary">登录监控中心</h4>
                 
-                <form @submit.prevent="handleAuth">
+                <form @submit.prevent="handleLogin">
                     <div class="mb-3">
                         <label class="form-label">用户名</label>
-                        <input type="text" class="form-control" v-model="authForm.username" required placeholder="请输入用户名">
+                        <input type="text" class="form-control" v-model="authForm.username" required placeholder="请输入管理员账号">
                     </div>
                     <div class="mb-3">
                         <label class="form-label">密码</label>
@@ -55,16 +53,12 @@
                     </div>
 
                     <div class="d-grid gap-2">
-                        <button type="submit" class="btn btn-primary">
-                            {{ isRegisterMode ? '立即注册' : '登录' }}
-                        </button>
+                        <button type="submit" class="btn btn-primary">登录</button>
                     </div>
                 </form>
-
-                <div class="text-center mt-3">
-                    <a href="#" class="text-decoration-none small" @click.prevent="toggleAuthMode">
-                        {{ isRegisterMode ? '已有账号？去登录' : '没有账号？去注册' }}
-                    </a>
+                
+                <div class="text-center mt-3 text-muted small">
+                    <small>内部系统，禁止公开注册</small>
                 </div>
             </div>
         </div>
@@ -107,9 +101,11 @@
                         <span class="badge bg-danger badge-type">{{ report.type || '未分类' }}</span>
                         <div class="card-body">
                             <h5 class="card-title text-truncate">{{ report.title }}</h5>
+                            
                             <h6 class="card-subtitle mb-2 location-text">
                                 <i class="bi bi-geo-alt"></i> {{ formatLocation(report.location) }}
                             </h6>
+                            
                             <p class="card-text small text-secondary" style="height: 60px; overflow: hidden;">
                                 {{ report.description || '暂无详细描述...' }}
                             </p>
@@ -133,37 +129,34 @@
             return {
                 apiBaseUrl: '', 
                 
-                // 认证相关状态
+                // 认证状态
                 isLoggedIn: false,
-                isRegisterMode: false,
                 currentUser: '',
                 authForm: { username: '', password: '' },
                 authError: null,
 
-                // 数据相关状态
+                // 数据状态
                 reports: [],
-                loading: false, // 初始不加载，登录操作时才loading
+                loading: false,
                 error: null
             }
         },
         mounted() {
-            // 1. 检查是否有历史登录记录
             const savedUser = localStorage.getItem('monitor_user');
             if (savedUser) {
                 this.isLoggedIn = true;
                 this.currentUser = savedUser;
-                this.fetchReports(); // 自动加载数据
+                this.fetchReports();
             }
         },
         methods: {
-            // --- 认证方法 ---
-            async handleAuth() {
+            // --- 认证方法 (仅保留登录) ---
+            async handleLogin() {
                 this.loading = true;
                 this.authError = null;
-                const endpoint = this.isRegisterMode ? '/api/register' : '/login';
-
+                
                 try {
-                    const response = await fetch(`${this.apiBaseUrl}${endpoint}`, {
+                    const response = await fetch(`${this.apiBaseUrl}/login`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(this.authForm)
@@ -172,31 +165,21 @@
                     const data = await response.json();
 
                     if (!response.ok) {
-                        throw new Error(data.message || '操作失败');
+                        throw new Error(data.message || '登录失败');
                     }
 
-                    if (this.isRegisterMode) {
-                        // 注册成功后，自动切换去登录，或者直接登录
-                        this.isRegisterMode = false;
-                        this.authError = null;
-                        alert('注册成功，请登录');
-                    } else {
-                        // 登录成功
-                        this.loginSuccess(this.authForm.username);
-                    }
+                    // 登录成功
+                    this.isLoggedIn = true;
+                    this.currentUser = this.authForm.username;
+                    localStorage.setItem('monitor_user', this.authForm.username);
+                    this.authForm = { username: '', password: '' };
+                    this.fetchReports();
+
                 } catch (err) {
                     this.authError = err.message;
                 } finally {
                     this.loading = false;
                 }
-            },
-
-            loginSuccess(username) {
-                this.isLoggedIn = true;
-                this.currentUser = username;
-                this.authForm = { username: '', password: '' }; // 清空表单
-                localStorage.setItem('monitor_user', username); // 持久化登录状态
-                this.fetchReports(); // 拉取数据
             },
 
             logout() {
@@ -206,13 +189,7 @@
                 localStorage.removeItem('monitor_user');
             },
 
-            toggleAuthMode() {
-                this.isRegisterMode = !this.isRegisterMode;
-                this.authError = null;
-                this.authForm = { username: '', password: '' };
-            },
-
-            // --- 数据方法 (保持不变) ---
+            // --- 数据与格式化方法 ---
             async fetchReports() {
                 this.loading = true;
                 try {
@@ -221,8 +198,8 @@
                     this.reports = await response.json();
                 } catch (err) {
                     this.error = "加载失败: " + err.message;
-                    if(response.status === 401) {
-                         this.logout(); // 如果后端鉴权失败，强制登出
+                    if(response && response.status === 401) {
+                         this.logout(); 
                     }
                 } finally {
                     this.loading = false;
@@ -239,16 +216,52 @@
                 if (!dateString) return '';
                 return new Date(dateString).toLocaleString('zh-CN', { hour12: false });
             },
+            
+            // --- 增强版 JSON 解析 ---
             formatLocation(locString) {
                 if (!locString) return '未知地点';
+
+                // 辅助函数：从对象中提取有用信息
+                const extractInfo = (obj) => {
+                    // 1. 优先返回具体的描述
+                    if (obj && obj.description && typeof obj.description === 'string' && obj.description.trim() !== "") {
+                        return obj.description;
+                    }
+                    // 2. 其次返回经纬度
+                    if (obj && obj.latitude) {
+                        return `Lat: ${Number(obj.latitude).toFixed(3)}, Lng: ${Number(obj.longitude).toFixed(3)}`;
+                    }
+                    return null;
+                };
+
+                // 情况 1: 尝试直接解析
                 try {
-                    const locationObj = JSON.parse(locString);
-                    if (locationObj && locationObj.description) return locationObj.description;
-                    if (locationObj && locationObj.latitude) return `Lat: ${locationObj.latitude}, Long: ${locationObj.longitude}`;
-                    return locString;
+                    const parsed = JSON.parse(locString);
+                    const info = extractInfo(parsed);
+                    if (info) return info;
                 } catch (e) {
-                    return locString;
+                    // 解析失败，说明不是纯 JSON，继续尝试正则提取
                 }
+
+                // 情况 2: 字符串中夹杂着 JSON，例如 "Some text { ... } some text"
+                // 使用正则提取最外层的 { ... }
+                try {
+                    const jsonMatch = locString.match(/\{.*\}/s); // s 修饰符让 . 匹配换行符
+                    if (jsonMatch) {
+                        const parsed = JSON.parse(jsonMatch[0]);
+                        const info = extractInfo(parsed);
+                        if (info) return info;
+                    }
+                } catch (e) {
+                    // 正则提取后解析依然失败，放弃
+                }
+
+                // 情况 3: 实在解析不出来，或者不是 JSON，直接显示原始字符串
+                // 为了防止太长，截断一下
+                if (locString.length > 50) {
+                    return locString.substring(0, 50) + '...';
+                }
+                return locString;
             }
         }
     }).mount('#app');
