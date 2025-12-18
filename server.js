@@ -1,5 +1,4 @@
-// MARK: - 自然灾害报告后端服务 (HTTPS + Web托管版)
-// 包含功能：REST API、图片上传、静态网页托管
+// MARK: - 自然灾害报告后端服务 (HTTPS + Web托管版 - 兼容旧版Node.js)
 
 // MARK: - 1. 引入模块
 const express = require('express');
@@ -13,7 +12,7 @@ const bcrypt = require('bcrypt');
 
 // MARK: - 2. 初始化
 const app = express();
-// 默认端口 3000，如果您想用标准HTTPS端口，启动时使用 sudo PORT=443 node server.js
+// 默认端口 3000
 const PORT = process.env.PORT || 3000;
 const DB_FILE_PATH = path.join(__dirname, 'db.json');
 const SALT_ROUNDS = 10;
@@ -21,13 +20,10 @@ const SALT_ROUNDS = 10;
 // MARK: - 3. 中间件设置
 app.use(cors());
 app.use(express.json());
-// 公开 'uploads' 文件夹，用于访问上传的图片
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// --- 新增：托管静态网页 ---
-// 允许直接通过 URL 访问 index.html
+// --- 托管静态网页 ---
 app.get('/', (req, res) => {
-    // 确保 index.html 文件和 server.js 在同一目录下
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
@@ -120,7 +116,10 @@ app.get('/api/reports', (req, res) => {
 
 app.post('/api/reports', (req, res) => {
     const db = readDb();
-    const newReport = { ...req.body, id: req.body.id || uuidv4() };
+    // 兼容处理
+    const newId = (req.body.id) ? req.body.id : uuidv4();
+    const newReport = Object.assign({}, req.body, { id: newId });
+    
     db.reports.unshift(newReport);
     writeDb(db);
     console.log('新报告:', newReport.title);
@@ -131,7 +130,10 @@ app.put('/api/reports/:id', (req, res) => {
     const db = readDb();
     const idx = db.reports.findIndex(r => r.id === req.params.id);
     if (idx !== -1) {
-        db.reports[idx] = { ...db.reports[idx], ...req.body };
+        // 兼容处理 Spread 语法在极老版本可能也有问题，但通常 Node 8+ 支持
+        // 这里改用 Object.assign 确保万无一失
+        const updatedReport = Object.assign({}, db.reports[idx], req.body);
+        db.reports[idx] = updatedReport;
         writeDb(db);
         console.log('更新报告:', db.reports[idx].title);
         res.status(200).json(db.reports[idx]);
@@ -146,9 +148,18 @@ app.delete('/api/reports/:id', (req, res) => {
     const newReports = db.reports.filter(r => r.id !== req.params.id);
 
     if (db.reports.length !== newReports.length) {
-        if (report?.imagePath) {
+        // --- 修改点在这里 ---
+        // 原代码: if (report?.imagePath) 
+        // 兼容代码:
+        if (report && report.imagePath) {
             const imgPath = path.join(__dirname, report.imagePath);
-            if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
+            if (fs.existsSync(imgPath)) {
+                try {
+                    fs.unlinkSync(imgPath);
+                } catch(e) {
+                    console.error("删除图片失败", e);
+                }
+            }
         }
         db.reports = newReports;
         writeDb(db);
@@ -161,7 +172,6 @@ app.delete('/api/reports/:id', (req, res) => {
 
 // MARK: - 7. 启动 HTTPS 服务器
 try {
-    // 读取证书 (路径固定为您提供的路径)
     const privateKey = fs.readFileSync('/root/ygkkkca/private.key', 'utf8');
     const certificate = fs.readFileSync('/root/ygkkkca/cert.crt', 'utf8');
     const credentials = { key: privateKey, cert: certificate };
@@ -170,12 +180,11 @@ try {
 
     httpsServer.listen(PORT, () => {
         console.log(`HTTPS 服务已启动`);
-        console.log(`- API 地址: https://您的域名:${PORT}/api/reports`);
-        console.log(`- 网页地址: https://您的域名:${PORT}/`);
+        console.log(`端口: ${PORT}`);
     });
 
 } catch (error) {
-    console.error('HTTPS 启动失败，请检查证书路径权限 (可能需要 sudo)');
+    console.error('HTTPS 启动失败，请检查证书路径权限');
     console.error(error.message);
     process.exit(1);
 }
