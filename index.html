@@ -7,9 +7,8 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <style>
-        body { background-color: #f8f9fa; }
+        body { background-color: #f8f9fa; min-height: 100vh; }
         .card-img-top { height: 200px; object-fit: cover; }
-        /* 调整统计卡片样式，因为图表没了，稍微改小一点高度 */
         .stats-card { min-height: 150px; display: flex; align-items: center; justify-content: center; }
         .loading-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -17,11 +16,13 @@
             display: flex; justify-content: center; align-items: center;
         }
         .badge-type { position: absolute; top: 10px; right: 10px; }
+        .location-text { font-size: 0.9rem; color: #6c757d; }
         
-        /* 针对位置信息的样式优化 */
-        .location-text {
-            font-size: 0.9rem;
-            color: #6c757d;
+        /* 登录页面的样式 */
+        .login-container {
+            max-width: 400px;
+            margin: 100px auto;
+            padding: 20px;
         }
     </style>
 </head>
@@ -29,56 +30,94 @@
 
 <div id="app">
     <div v-if="loading" class="loading-overlay">
-        <div class="spinner-border text-primary" role="status"><span class="visually-hidden">加载中...</span></div>
+        <div class="spinner-border text-primary" role="status"><span class="visually-hidden">处理中...</span></div>
     </div>
 
-    <nav class="navbar navbar-dark bg-primary mb-4">
-        <div class="container">
-            <span class="navbar-brand mb-0 h1">灾害监测与报告系统</span>
-            <span class="text-white">实时监控面板</span>
-        </div>
-    </nav>
-
-    <div class="container">
-        <div v-if="error" class="alert alert-danger" role="alert">{{ error }}</div>
-
-        <div class="row mb-4">
-            <div class="col-12">
-                <div class="card stats-card shadow-sm">
-                    <div class="card-body text-center">
-                        <h5 class="card-title text-muted">当前收到报告总数</h5>
-                        <h1 class="display-3 fw-bold text-primary">{{ reports.length }}</h1>
-                        <p class="text-secondary mb-0">实时数据</p>
+    <div v-if="!isLoggedIn" class="container">
+        <div class="card login-container shadow">
+            <div class="card-body">
+                <h4 class="card-title text-center mb-4 text-primary">
+                    {{ isRegisterMode ? '注册管理员账号' : '登录监控中心' }}
+                </h4>
+                
+                <form @submit.prevent="handleAuth">
+                    <div class="mb-3">
+                        <label class="form-label">用户名</label>
+                        <input type="text" class="form-control" v-model="authForm.username" required placeholder="请输入用户名">
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label">密码</label>
+                        <input type="password" class="form-control" v-model="authForm.password" required placeholder="请输入密码">
+                    </div>
+
+                    <div v-if="authError" class="alert alert-danger py-2 small" role="alert">
+                        {{ authError }}
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            {{ isRegisterMode ? '立即注册' : '登录' }}
+                        </button>
+                    </div>
+                </form>
+
+                <div class="text-center mt-3">
+                    <a href="#" class="text-decoration-none small" @click.prevent="toggleAuthMode">
+                        {{ isRegisterMode ? '已有账号？去登录' : '没有账号？去注册' }}
+                    </a>
                 </div>
             </div>
         </div>
+    </div>
 
-        <h3 class="mb-3 border-start border-4 border-primary ps-3">最新报告列表</h3>
-        
-        <div v-if="reports.length === 0 && !loading" class="text-center py-5 text-muted">暂无数据</div>
+    <div v-else>
+        <nav class="navbar navbar-dark bg-primary mb-4">
+            <div class="container">
+                <span class="navbar-brand mb-0 h1">灾害监测与报告系统</span>
+                <div class="d-flex align-items-center">
+                    <span class="text-white me-3 small">欢迎, {{ currentUser }}</span>
+                    <button class="btn btn-sm btn-light text-primary fw-bold" @click="logout">注销</button>
+                </div>
+            </div>
+        </nav>
 
-        <div class="row g-4">
-            <div class="col-md-4 col-sm-6" v-for="report in reports" :key="report.id">
-                <div class="card h-100 shadow-sm border-0">
-                    <img :src="getImageUrl(report.imagePath)" class="card-img-top" alt="现场图片" @error="handleImageError">
-                    
-                    <span class="badge bg-danger badge-type">{{ report.type || '未分类' }}</span>
+        <div class="container">
+            <div v-if="error" class="alert alert-danger" role="alert">{{ error }}</div>
 
-                    <div class="card-body">
-                        <h5 class="card-title text-truncate">{{ report.title }}</h5>
-                        
-                        <h6 class="card-subtitle mb-2 location-text">
-                            <i class="bi bi-geo-alt"></i> {{ formatLocation(report.location) }}
-                        </h6>
-
-                        <p class="card-text small text-secondary" style="height: 60px; overflow: hidden; text-overflow: ellipsis;">
-                            {{ report.description || '暂无详细描述...' }}
-                        </p>
+            <div class="row mb-4">
+                <div class="col-12">
+                    <div class="card stats-card shadow-sm">
+                        <div class="card-body text-center">
+                            <h5 class="card-title text-muted">当前收到报告总数</h5>
+                            <h1 class="display-3 fw-bold text-primary">{{ reports.length }}</h1>
+                            <p class="text-secondary mb-0">实时数据</p>
+                        </div>
                     </div>
-                    <div class="card-footer bg-white border-top-0 d-flex justify-content-between align-items-center">
-                        <small class="text-muted">{{ formatDate(report.date) }}</small>
-                        <small class="text-primary fw-bold">用户: {{ report.username || '匿名' }}</small>
+                </div>
+            </div>
+
+            <h3 class="mb-3 border-start border-4 border-primary ps-3">最新报告列表</h3>
+            
+            <div v-if="reports.length === 0 && !loading" class="text-center py-5 text-muted">暂无数据</div>
+
+            <div class="row g-4">
+                <div class="col-md-4 col-sm-6" v-for="report in reports" :key="report.id">
+                    <div class="card h-100 shadow-sm border-0">
+                        <img :src="getImageUrl(report.imagePath)" class="card-img-top" alt="现场图片" @error="handleImageError">
+                        <span class="badge bg-danger badge-type">{{ report.type || '未分类' }}</span>
+                        <div class="card-body">
+                            <h5 class="card-title text-truncate">{{ report.title }}</h5>
+                            <h6 class="card-subtitle mb-2 location-text">
+                                <i class="bi bi-geo-alt"></i> {{ formatLocation(report.location) }}
+                            </h6>
+                            <p class="card-text small text-secondary" style="height: 60px; overflow: hidden;">
+                                {{ report.description || '暂无详细描述...' }}
+                            </p>
+                        </div>
+                        <div class="card-footer bg-white border-top-0 d-flex justify-content-between align-items-center">
+                            <small class="text-muted">{{ formatDate(report.date) }}</small>
+                            <small class="text-primary fw-bold">用户: {{ report.username || '匿名' }}</small>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -92,25 +131,99 @@
     createApp({
         data() {
             return {
-                // 自动使用当前域名和端口
                 apiBaseUrl: '', 
+                
+                // 认证相关状态
+                isLoggedIn: false,
+                isRegisterMode: false,
+                currentUser: '',
+                authForm: { username: '', password: '' },
+                authError: null,
+
+                // 数据相关状态
                 reports: [],
-                loading: true,
+                loading: false, // 初始不加载，登录操作时才loading
                 error: null
             }
         },
         mounted() {
-            this.fetchReports();
+            // 1. 检查是否有历史登录记录
+            const savedUser = localStorage.getItem('monitor_user');
+            if (savedUser) {
+                this.isLoggedIn = true;
+                this.currentUser = savedUser;
+                this.fetchReports(); // 自动加载数据
+            }
         },
         methods: {
+            // --- 认证方法 ---
+            async handleAuth() {
+                this.loading = true;
+                this.authError = null;
+                const endpoint = this.isRegisterMode ? '/api/register' : '/login';
+
+                try {
+                    const response = await fetch(`${this.apiBaseUrl}${endpoint}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(this.authForm)
+                    });
+
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(data.message || '操作失败');
+                    }
+
+                    if (this.isRegisterMode) {
+                        // 注册成功后，自动切换去登录，或者直接登录
+                        this.isRegisterMode = false;
+                        this.authError = null;
+                        alert('注册成功，请登录');
+                    } else {
+                        // 登录成功
+                        this.loginSuccess(this.authForm.username);
+                    }
+                } catch (err) {
+                    this.authError = err.message;
+                } finally {
+                    this.loading = false;
+                }
+            },
+
+            loginSuccess(username) {
+                this.isLoggedIn = true;
+                this.currentUser = username;
+                this.authForm = { username: '', password: '' }; // 清空表单
+                localStorage.setItem('monitor_user', username); // 持久化登录状态
+                this.fetchReports(); // 拉取数据
+            },
+
+            logout() {
+                this.isLoggedIn = false;
+                this.currentUser = '';
+                this.reports = [];
+                localStorage.removeItem('monitor_user');
+            },
+
+            toggleAuthMode() {
+                this.isRegisterMode = !this.isRegisterMode;
+                this.authError = null;
+                this.authForm = { username: '', password: '' };
+            },
+
+            // --- 数据方法 (保持不变) ---
             async fetchReports() {
+                this.loading = true;
                 try {
                     const response = await fetch(`${this.apiBaseUrl}/api/reports`);
                     if (!response.ok) throw new Error('无法连接到服务器');
                     this.reports = await response.json();
                 } catch (err) {
                     this.error = "加载失败: " + err.message;
-                    console.error(err);
+                    if(response.status === 401) {
+                         this.logout(); // 如果后端鉴权失败，强制登出
+                    }
                 } finally {
                     this.loading = false;
                 }
@@ -126,28 +239,14 @@
                 if (!dateString) return '';
                 return new Date(dateString).toLocaleString('zh-CN', { hour12: false });
             },
-            // 新增：专门处理 JSON 格式的地理位置字符串
             formatLocation(locString) {
                 if (!locString) return '未知地点';
-                
                 try {
-                    // 尝试解析 JSON
-                    // 你的数据格式类似: { "latitude": 31.4, "longitude": 109.6, "description": "xxx" }
                     const locationObj = JSON.parse(locString);
-                    
-                    // 如果解析成功，优先返回 description
-                    if (locationObj && locationObj.description) {
-                        return locationObj.description;
-                    }
-                    
-                    // 如果没有 description，返回经纬度
-                    if (locationObj && locationObj.latitude && locationObj.longitude) {
-                        return `Lat: ${locationObj.latitude}, Long: ${locationObj.longitude}`;
-                    }
-                    
-                    return locString; // 解析出了对象但没内容，返回原字符串
+                    if (locationObj && locationObj.description) return locationObj.description;
+                    if (locationObj && locationObj.latitude) return `Lat: ${locationObj.latitude}, Long: ${locationObj.longitude}`;
+                    return locString;
                 } catch (e) {
-                    // 如果解析失败（说明不是 JSON，是普通字符串），直接显示
                     return locString;
                 }
             }
