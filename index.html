@@ -21,17 +21,17 @@
         /* 登录框样式 */
         .login-container { max-width: 400px; margin: 100px auto; padding: 20px; }
 
-        /* 新增：位置信息样式优化 */
+        /* 位置信息样式 */
         .location-title {
             font-size: 1rem;
-            font-weight: 600; /* 加粗 */
+            font-weight: 600;
             color: #212529;
             margin-bottom: 2px;
         }
         .location-subtitle {
-            font-size: 0.75rem; /* 小字体 */
-            color: #6c757d; /* 灰色 */
-            font-family: monospace; /* 等宽字体显示数字更好看 */
+            font-size: 0.85rem; /*稍微调大一点，方便看坐标*/
+            color: #6c757d;
+            font-family: monospace; 
         }
     </style>
 </head>
@@ -157,7 +157,6 @@
             }
         },
         methods: {
-            // --- 登录逻辑 ---
             async handleLogin() {
                 this.loading = true;
                 this.authError = null;
@@ -210,17 +209,13 @@
                 return new Date(dateString).toLocaleString('zh-CN', { hour12: false });
             },
 
-            // --- 核心修改：位置解析函数 ---
-            // 返回格式：{ isJson: boolean, title: string, subtitle: string }
+            // --- 位置解析函数 ---
             parseLocation(locString) {
                 if (!locString) return { isJson: false, title: '未知地点', subtitle: '' };
 
                 let jsonObj = null;
-                
-                // 1. 尝试直接解析
                 try { jsonObj = JSON.parse(locString); } catch(e) {}
 
-                // 2. 尝试正则提取 (针对混合文本的情况)
                 if (!jsonObj) {
                     try {
                         const match = locString.match(/\{.*\}/s);
@@ -228,22 +223,19 @@
                     } catch(e) {}
                 }
 
-                // 3. 如果解析出对象，格式化输出
                 if (jsonObj) {
-                    // 获取描述作为主标题
                     const title = jsonObj.description || '无位置描述';
                     
-                    // 获取经纬度作为副标题
+                    // --- 修改点：按照您的要求格式化 ---
                     let subtitle = '';
                     if (jsonObj.latitude && jsonObj.longitude) {
-                        subtitle = `经度: ${Number(jsonObj.longitude).toFixed(4)}  |  纬度: ${Number(jsonObj.latitude).toFixed(4)}`;
+                        // 格式：经纬度：纬度,经度 (直接使用原数值，不强制截断小数位，保留原始精度)
+                        subtitle = `经纬度：${jsonObj.latitude},${jsonObj.longitude}`;
                     }
 
                     return { isJson: true, title: title, subtitle: subtitle };
                 }
 
-                // 4. 解析失败，返回原始字符串
-                // 截断太长的原始文本
                 const displayTitle = locString.length > 30 ? locString.substring(0, 30) + '...' : locString;
                 return { isJson: false, title: displayTitle, subtitle: '' };
             }
