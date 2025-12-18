@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>灾害报告监控中心</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <style>
         body { background-color: #f8f9fa; min-height: 100vh; }
@@ -16,13 +17,21 @@
             display: flex; justify-content: center; align-items: center;
         }
         .badge-type { position: absolute; top: 10px; right: 10px; }
-        .location-text { font-size: 0.9rem; color: #6c757d; }
         
-        /* 登录页面的样式 */
-        .login-container {
-            max-width: 400px;
-            margin: 100px auto;
-            padding: 20px;
+        /* 登录框样式 */
+        .login-container { max-width: 400px; margin: 100px auto; padding: 20px; }
+
+        /* 新增：位置信息样式优化 */
+        .location-title {
+            font-size: 1rem;
+            font-weight: 600; /* 加粗 */
+            color: #212529;
+            margin-bottom: 2px;
+        }
+        .location-subtitle {
+            font-size: 0.75rem; /* 小字体 */
+            color: #6c757d; /* 灰色 */
+            font-family: monospace; /* 等宽字体显示数字更好看 */
         }
     </style>
 </head>
@@ -37,7 +46,6 @@
         <div class="card login-container shadow">
             <div class="card-body">
                 <h4 class="card-title text-center mb-4 text-primary">登录监控中心</h4>
-                
                 <form @submit.prevent="handleLogin">
                     <div class="mb-3">
                         <label class="form-label">用户名</label>
@@ -47,19 +55,12 @@
                         <label class="form-label">密码</label>
                         <input type="password" class="form-control" v-model="authForm.password" required placeholder="请输入密码">
                     </div>
-
-                    <div v-if="authError" class="alert alert-danger py-2 small" role="alert">
-                        {{ authError }}
-                    </div>
-
+                    <div v-if="authError" class="alert alert-danger py-2 small" role="alert">{{ authError }}</div>
                     <div class="d-grid gap-2">
                         <button type="submit" class="btn btn-primary">登录</button>
                     </div>
                 </form>
-                
-                <div class="text-center mt-3 text-muted small">
-                    <small>内部系统，禁止公开注册</small>
-                </div>
+                <div class="text-center mt-3 text-muted small"><small>内部系统，禁止公开注册</small></div>
             </div>
         </div>
     </div>
@@ -91,7 +92,6 @@
             </div>
 
             <h3 class="mb-3 border-start border-4 border-primary ps-3">最新报告列表</h3>
-            
             <div v-if="reports.length === 0 && !loading" class="text-center py-5 text-muted">暂无数据</div>
 
             <div class="row g-4">
@@ -99,13 +99,24 @@
                     <div class="card h-100 shadow-sm border-0">
                         <img :src="getImageUrl(report.imagePath)" class="card-img-top" alt="现场图片" @error="handleImageError">
                         <span class="badge bg-danger badge-type">{{ report.type || '未分类' }}</span>
+                        
                         <div class="card-body">
-                            <h5 class="card-title text-truncate">{{ report.title }}</h5>
+                            <h5 class="card-title text-truncate mb-3">{{ report.title }}</h5>
                             
-                            <h6 class="card-subtitle mb-2 location-text">
-                                <i class="bi bi-geo-alt"></i> {{ formatLocation(report.location) }}
-                            </h6>
-                            
+                            <div class="mb-3 p-2 bg-light rounded border-start border-3 border-warning">
+                                <div v-if="parseLocation(report.location).isJson">
+                                    <div class="location-title text-truncate">
+                                        <i class="bi bi-geo-alt-fill text-danger"></i> 
+                                        {{ parseLocation(report.location).title }}
+                                    </div>
+                                    <div class="location-subtitle ps-3">
+                                        {{ parseLocation(report.location).subtitle }}
+                                    </div>
+                                </div>
+                                <div v-else class="location-title text-secondary" style="font-size: 0.9rem;">
+                                    <i class="bi bi-geo-alt"></i> {{ parseLocation(report.location).title }}
+                                </div>
+                            </div>
                             <p class="card-text small text-secondary" style="height: 60px; overflow: hidden;">
                                 {{ report.description || '暂无详细描述...' }}
                             </p>
@@ -128,14 +139,10 @@
         data() {
             return {
                 apiBaseUrl: '', 
-                
-                // 认证状态
                 isLoggedIn: false,
                 currentUser: '',
                 authForm: { username: '', password: '' },
                 authError: null,
-
-                // 数据状态
                 reports: [],
                 loading: false,
                 error: null
@@ -150,46 +157,36 @@
             }
         },
         methods: {
-            // --- 认证方法 (仅保留登录) ---
+            // --- 登录逻辑 ---
             async handleLogin() {
                 this.loading = true;
                 this.authError = null;
-                
                 try {
                     const response = await fetch(`${this.apiBaseUrl}/login`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(this.authForm)
                     });
-
                     const data = await response.json();
-
-                    if (!response.ok) {
-                        throw new Error(data.message || '登录失败');
-                    }
-
-                    // 登录成功
+                    if (!response.ok) throw new Error(data.message || '登录失败');
+                    
                     this.isLoggedIn = true;
                     this.currentUser = this.authForm.username;
                     localStorage.setItem('monitor_user', this.authForm.username);
                     this.authForm = { username: '', password: '' };
                     this.fetchReports();
-
                 } catch (err) {
                     this.authError = err.message;
                 } finally {
                     this.loading = false;
                 }
             },
-
             logout() {
                 this.isLoggedIn = false;
                 this.currentUser = '';
                 this.reports = [];
                 localStorage.removeItem('monitor_user');
             },
-
-            // --- 数据与格式化方法 ---
             async fetchReports() {
                 this.loading = true;
                 try {
@@ -198,9 +195,7 @@
                     this.reports = await response.json();
                 } catch (err) {
                     this.error = "加载失败: " + err.message;
-                    if(response && response.status === 401) {
-                         this.logout(); 
-                    }
+                    if(response && response.status === 401) this.logout(); 
                 } finally {
                     this.loading = false;
                 }
@@ -209,59 +204,48 @@
                 if (!path) return 'https://via.placeholder.com/400x200?text=No+Image';
                 return path.startsWith('/') ? path : `/${path}`;
             },
-            handleImageError(e) {
-                e.target.src = 'https://via.placeholder.com/400x200?text=Image+Error';
-            },
+            handleImageError(e) { e.target.src = 'https://via.placeholder.com/400x200?text=Image+Error'; },
             formatDate(dateString) {
                 if (!dateString) return '';
                 return new Date(dateString).toLocaleString('zh-CN', { hour12: false });
             },
-            
-            // --- 增强版 JSON 解析 ---
-            formatLocation(locString) {
-                if (!locString) return '未知地点';
 
-                // 辅助函数：从对象中提取有用信息
-                const extractInfo = (obj) => {
-                    // 1. 优先返回具体的描述
-                    if (obj && obj.description && typeof obj.description === 'string' && obj.description.trim() !== "") {
-                        return obj.description;
-                    }
-                    // 2. 其次返回经纬度
-                    if (obj && obj.latitude) {
-                        return `Lat: ${Number(obj.latitude).toFixed(3)}, Lng: ${Number(obj.longitude).toFixed(3)}`;
-                    }
-                    return null;
-                };
+            // --- 核心修改：位置解析函数 ---
+            // 返回格式：{ isJson: boolean, title: string, subtitle: string }
+            parseLocation(locString) {
+                if (!locString) return { isJson: false, title: '未知地点', subtitle: '' };
 
-                // 情况 1: 尝试直接解析
-                try {
-                    const parsed = JSON.parse(locString);
-                    const info = extractInfo(parsed);
-                    if (info) return info;
-                } catch (e) {
-                    // 解析失败，说明不是纯 JSON，继续尝试正则提取
+                let jsonObj = null;
+                
+                // 1. 尝试直接解析
+                try { jsonObj = JSON.parse(locString); } catch(e) {}
+
+                // 2. 尝试正则提取 (针对混合文本的情况)
+                if (!jsonObj) {
+                    try {
+                        const match = locString.match(/\{.*\}/s);
+                        if (match) jsonObj = JSON.parse(match[0]);
+                    } catch(e) {}
                 }
 
-                // 情况 2: 字符串中夹杂着 JSON，例如 "Some text { ... } some text"
-                // 使用正则提取最外层的 { ... }
-                try {
-                    const jsonMatch = locString.match(/\{.*\}/s); // s 修饰符让 . 匹配换行符
-                    if (jsonMatch) {
-                        const parsed = JSON.parse(jsonMatch[0]);
-                        const info = extractInfo(parsed);
-                        if (info) return info;
+                // 3. 如果解析出对象，格式化输出
+                if (jsonObj) {
+                    // 获取描述作为主标题
+                    const title = jsonObj.description || '无位置描述';
+                    
+                    // 获取经纬度作为副标题
+                    let subtitle = '';
+                    if (jsonObj.latitude && jsonObj.longitude) {
+                        subtitle = `经度: ${Number(jsonObj.longitude).toFixed(4)}  |  纬度: ${Number(jsonObj.latitude).toFixed(4)}`;
                     }
-                } catch (e) {
-                    // 正则提取后解析依然失败，放弃
+
+                    return { isJson: true, title: title, subtitle: subtitle };
                 }
 
-                // 情况 3: 实在解析不出来，或者不是 JSON，直接显示原始字符串
-                // 为了防止太长，截断一下
-                if (locString.length > 50) {
-                    return locString.substring(0, 50) + '...';
-                }
-                return locString;
+                // 4. 解析失败，返回原始字符串
+                // 截断太长的原始文本
+                const displayTitle = locString.length > 30 ? locString.substring(0, 30) + '...' : locString;
+                return { isJson: false, title: displayTitle, subtitle: '' };
             }
         }
     }).mount('#app');
