@@ -5,18 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>灾害报告监控中心</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <style>
         body { background-color: #f8f9fa; }
         .card-img-top { height: 200px; object-fit: cover; }
-        .stats-card { min-height: 300px; }
+        /* 调整统计卡片样式，因为图表没了，稍微改小一点高度 */
+        .stats-card { min-height: 150px; display: flex; align-items: center; justify-content: center; }
         .loading-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(255,255,255,0.8); z-index: 9999;
             display: flex; justify-content: center; align-items: center;
         }
         .badge-type { position: absolute; top: 10px; right: 10px; }
+        
+        /* 针对位置信息的样式优化 */
+        .location-text {
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
     </style>
 </head>
 <body>
@@ -37,20 +43,12 @@
         <div v-if="error" class="alert alert-danger" role="alert">{{ error }}</div>
 
         <div class="row mb-4">
-            <div class="col-md-4">
+            <div class="col-12">
                 <div class="card stats-card shadow-sm">
                     <div class="card-body text-center">
-                        <h5 class="card-title text-muted">总报告数</h5>
-                        <h1 class="display-1 fw-bold text-primary">{{ reports.length }}</h1>
-                        <p class="text-secondary">实时数据</p>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-8">
-                <div class="card stats-card shadow-sm">
-                    <div class="card-body">
-                        <h5 class="card-title">灾害类型分布</h5>
-                        <canvas id="typeChart"></canvas>
+                        <h5 class="card-title text-muted">当前收到报告总数</h5>
+                        <h1 class="display-3 fw-bold text-primary">{{ reports.length }}</h1>
+                        <p class="text-secondary mb-0">实时数据</p>
                     </div>
                 </div>
             </div>
@@ -64,11 +62,17 @@
             <div class="col-md-4 col-sm-6" v-for="report in reports" :key="report.id">
                 <div class="card h-100 shadow-sm border-0">
                     <img :src="getImageUrl(report.imagePath)" class="card-img-top" alt="现场图片" @error="handleImageError">
+                    
                     <span class="badge bg-danger badge-type">{{ report.type || '未分类' }}</span>
+
                     <div class="card-body">
                         <h5 class="card-title text-truncate">{{ report.title }}</h5>
-                        <h6 class="card-subtitle mb-2 text-muted"><i class="bi bi-geo-alt"></i> {{ report.location || '未知地点' }}</h6>
-                        <p class="card-text small text-secondary" style="height: 40px; overflow: hidden;">
+                        
+                        <h6 class="card-subtitle mb-2 location-text">
+                            <i class="bi bi-geo-alt"></i> {{ formatLocation(report.location) }}
+                        </h6>
+
+                        <p class="card-text small text-secondary" style="height: 60px; overflow: hidden; text-overflow: ellipsis;">
                             {{ report.description || '暂无详细描述...' }}
                         </p>
                     </div>
@@ -88,24 +92,22 @@
     createApp({
         data() {
             return {
-                // 关键修改：设置为空字符串。
-                // 浏览器会自动使用当前页面的域名和端口，无需手动修改！
+                // 自动使用当前域名和端口
                 apiBaseUrl: '', 
                 reports: [],
                 loading: true,
-                error: null,
-                chartInstance: null
+                error: null
             }
         },
-        mounted() { this.fetchReports(); },
+        mounted() {
+            this.fetchReports();
+        },
         methods: {
             async fetchReports() {
                 try {
-                    // 自动请求 /api/reports
                     const response = await fetch(`${this.apiBaseUrl}/api/reports`);
                     if (!response.ok) throw new Error('无法连接到服务器');
                     this.reports = await response.json();
-                    this.$nextTick(() => this.renderChart());
                 } catch (err) {
                     this.error = "加载失败: " + err.message;
                     console.error(err);
@@ -115,7 +117,6 @@
             },
             getImageUrl(path) {
                 if (!path) return 'https://via.placeholder.com/400x200?text=No+Image';
-                // 自动拼接当前域名
                 return path.startsWith('/') ? path : `/${path}`;
             },
             handleImageError(e) {
@@ -125,27 +126,30 @@
                 if (!dateString) return '';
                 return new Date(dateString).toLocaleString('zh-CN', { hour12: false });
             },
-            renderChart() {
-                const typeCounts = {};
-                this.reports.forEach(r => {
-                    const type = r.type || '其他';
-                    typeCounts[type] = (typeCounts[type] || 0) + 1;
-                });
-                const ctx = document.getElementById('typeChart');
-                if (!ctx) return;
-                if (this.chartInstance) this.chartInstance.destroy();
+            // 新增：专门处理 JSON 格式的地理位置字符串
+            formatLocation(locString) {
+                if (!locString) return '未知地点';
                 
-                this.chartInstance = new Chart(ctx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: Object.keys(typeCounts),
-                        datasets: [{
-                            data: Object.values(typeCounts),
-                            backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40']
-                        }]
-                    },
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } }
-                });
+                try {
+                    // 尝试解析 JSON
+                    // 你的数据格式类似: { "latitude": 31.4, "longitude": 109.6, "description": "xxx" }
+                    const locationObj = JSON.parse(locString);
+                    
+                    // 如果解析成功，优先返回 description
+                    if (locationObj && locationObj.description) {
+                        return locationObj.description;
+                    }
+                    
+                    // 如果没有 description，返回经纬度
+                    if (locationObj && locationObj.latitude && locationObj.longitude) {
+                        return `Lat: ${locationObj.latitude}, Long: ${locationObj.longitude}`;
+                    }
+                    
+                    return locString; // 解析出了对象但没内容，返回原字符串
+                } catch (e) {
+                    // 如果解析失败（说明不是 JSON，是普通字符串），直接显示
+                    return locString;
+                }
             }
         }
     }).mount('#app');
