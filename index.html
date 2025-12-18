@@ -19,7 +19,7 @@
         .badge-type { position: absolute; top: 10px; right: 10px; }
         .login-container { max-width: 400px; margin: 100px auto; padding: 20px; }
         
-        /* 这里的样式决定了显示的排版 */
+        /* 样式微调 */
         .location-title { font-size: 1rem; font-weight: 600; color: #212529; margin-bottom: 2px; }
         .location-subtitle { font-size: 0.85rem; color: #6c757d; font-family: monospace; }
     </style>
@@ -50,7 +50,7 @@
             <div class="container">
                 <span class="navbar-brand mb-0 h1">
                     灾害监测与报告系统 
-                    <span class="badge bg-success text-white ms-2" style="font-size:0.7rem;">v3.1</span>
+                    <span class="badge bg-primary text-white ms-2" style="font-size:0.7rem;">v3.2</span>
                 </span>
                 <div class="d-flex align-items-center">
                     <span class="text-white me-3 small">欢迎, {{ currentUser }}</span>
@@ -148,50 +148,51 @@
             handleImageError(e) { e.target.src = 'https://via.placeholder.com/400x200'; },
             formatDate(d) { return d ? new Date(d).toLocaleString('zh-CN', {hour12:false}) : ''; },
             
-            // --- 核心修复：更强壮的解析逻辑 ---
-            parseLocation(locString) {
-                if (!locString) return { isJson: false, title: '未知地点', subtitle: '' };
+            // --- 终极修复：先判断类型，再解析 ---
+            parseLocation(locData) {
+                if (!locData) return { isJson: false, title: '未知地点', subtitle: '' };
 
                 let jsonObj = null;
-                
-                // 1. 第一步：尝试标准 JSON 解析（先去空格）
-                try { 
-                    jsonObj = JSON.parse(locString.trim()); 
-                } catch(e) {}
 
-                // 2. 第二步：如果标准解析失败，使用正则“暴力提取”
-                // 这能解决多余空格、不规范引号或嵌套结构的问题
-                if (!jsonObj) {
-                    try {
-                        const descMatch = locString.match(/"description"\s*:\s*"([^"]+)"/);
-                        const latMatch = locString.match(/"latitude"\s*:\s*([0-9.]+)/);
-                        const longMatch = locString.match(/"longitude"\s*:\s*([0-9.]+)/);
-
-                        if (descMatch || (latMatch && longMatch)) {
-                            jsonObj = {
-                                description: descMatch ? descMatch[1] : null,
-                                latitude: latMatch ? latMatch[1] : null,
-                                longitude: longMatch ? longMatch[1] : null
-                            };
-                        }
-                    } catch(e) {}
+                // 1. 如果它已经是对象了 (关键修复!)
+                if (typeof locData === 'object') {
+                    jsonObj = locData;
+                } 
+                // 2. 如果是字符串，才去尝试解析
+                else if (typeof locData === 'string') {
+                    try { jsonObj = JSON.parse(locData.trim()); } catch(e) {}
+                    
+                    // 正则保底
+                    if (!jsonObj) {
+                        try {
+                            const descMatch = locData.match(/"description"\s*:\s*"([^"]+)"/);
+                            const latMatch = locData.match(/"latitude"\s*:\s*([0-9.]+)/);
+                            const longMatch = locData.match(/"longitude"\s*:\s*([0-9.]+)/);
+                            if (descMatch || (latMatch && longMatch)) {
+                                jsonObj = {
+                                    description: descMatch ? descMatch[1] : null,
+                                    latitude: latMatch ? latMatch[1] : null,
+                                    longitude: longMatch ? longMatch[1] : null
+                                };
+                            }
+                        } catch(e) {}
+                    }
                 }
 
-                // 3. 构建结果
+                // 3. 格式化输出
                 if (jsonObj) {
                     const title = jsonObj.description || '无位置描述';
                     let subtitle = '';
-                    
                     if (jsonObj.latitude && jsonObj.longitude) {
-                        // 强制格式：经纬度：纬度,经度
+                        // 格式：经纬度：纬度,经度
                         subtitle = `经纬度：${jsonObj.latitude},${jsonObj.longitude}`;
                     }
-
                     return { isJson: true, title: title, subtitle: subtitle };
                 }
 
-                // 4. 彻底失败时，显示原文本
-                const displayTitle = locString.length > 30 ? locString.substring(0,30)+'...' : locString;
+                // 4. 彻底失败
+                const str = String(locData); // 确保转为字符串显示
+                const displayTitle = str.length > 30 ? str.substring(0,30)+'...' : str;
                 return { isJson: false, title: displayTitle, subtitle: '' };
             }
         }
