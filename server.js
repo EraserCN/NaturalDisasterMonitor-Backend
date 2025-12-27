@@ -26,12 +26,12 @@ const apnOptions = {
         keyId: '4P8H3V8HA4',
         teamId: '3P763V36ZR'
     },
-    production: false // 开发环境用 false (Sandbox)，正式上线改为 true
+    production: true // 开发环境用 false (Sandbox)，正式上线改为 true
 };
 
 const apnProvider = new apn.Provider(apnOptions);
 // ⚠️ 请确保这里是你的 App Bundle ID
-const BUNDLE_ID = 'com.ethanyi.NaturalDisasterMonitor';
+const BUNDLE_ID = 'org.eraser.NaturalDisasterMonitor';
 
 // MARK: - 3. 中间件设置
 app.use(cors());
