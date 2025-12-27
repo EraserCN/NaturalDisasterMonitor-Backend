@@ -18,7 +18,7 @@ const DB_FILE_PATH = path.join(__dirname, 'db.json');
 const SALT_ROUNDS = 10;
 
 // ⚠️ 请务必确认这里是你的 App Bundle ID
-const BUNDLE_ID = 'com.ethanyi.NaturalDisasterMonitor';
+const BUNDLE_ID = 'org.eraser.NaturalDisasterMonitor';
 
 // MARK: - ✅ APNs 双通道配置
 // 确保 'AuthKey_4P8H3V8HA4.p8' 文件放在和 server.js 同一级目录下
