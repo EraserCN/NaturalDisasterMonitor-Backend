@@ -1,4 +1,4 @@
-// MARK: - 自然灾害报告后端服务 (HTTPS + Web托管版 + 双通道APNs推送)
+// MARK: - 自然灾害报告后端服务 (HTTPS + Web托管版 + 双通道APNs推送 + 调试增强版)
 
 // 1. 引入模块
 const express = require('express');
@@ -9,7 +9,7 @@ const path = require('path');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcrypt');
-const apn = require('apn'); // 引入 APNs 推送库
+const apn = require('apn');
 
 // 2. 初始化配置
 const app = express();
@@ -17,10 +17,10 @@ const PORT = process.env.PORT || 3000;
 const DB_FILE_PATH = path.join(__dirname, 'db.json');
 const SALT_ROUNDS = 10;
 
-// ⚠️ 请务必确认这里是你的 App Bundle ID (主 App 的 ID)
-const BUNDLE_ID = 'org.eraser.NaturalDisasterMonitor';
+// ⚠️ 请务必确认这里是你的 App Bundle ID
+const BUNDLE_ID = 'com.ethanyi.NaturalDisasterMonitor';
 
-// MARK: - ✅ APNs 双通道配置 (解决 BadDeviceToken 核心方案)
+// MARK: - ✅ APNs 双通道配置
 // 确保 'AuthKey_4P8H3V8HA4.p8' 文件放在和 server.js 同一级目录下
 const keysOptions = {
     token: {
@@ -30,13 +30,13 @@ const keysOptions = {
     }
 };
 
-// 通道 1: 开发环境 (Sandbox) - 用于 Xcode 真机调试
+// 通道 1: 开发环境 (Sandbox)
 const apnProviderSandbox = new apn.Provider({
     ...keysOptions,
     production: false
 });
 
-// 通道 2: 生产环境 (Production) - 用于 TestFlight / App Store
+// 通道 2: 生产环境 (Production)
 const apnProviderProduction = new apn.Provider({
     ...keysOptions,
     production: true
@@ -49,7 +49,6 @@ app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// 托管静态网页 (可选)
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
@@ -88,24 +87,27 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// MARK: - 6. 核心功能：双通道推送逻辑
+// MARK: - 6. 核心功能：双通道推送逻辑 (含错误捕获)
 const sendLiveActivityUpdate = (token, report) => {
-    if (!token) return;
+    if (!token) {
+        console.error("❌ 无法推送: Token 为空");
+        return;
+    }
 
     const notification = new apn.Notification();
-    notification.expiry = Math.floor(Date.now() / 1000) + 3600; // 1小时过期
-    notification.priority = 10; // 立即发送
+    notification.expiry = Math.floor(Date.now() / 1000) + 3600;
+    notification.priority = 10;
     notification.topic = `${BUNDLE_ID}.push-type.liveactivity`;
     notification.pushType = "liveactivity";
 
-    // 构造 Payload (必须与 Swift ContentState 严格对应)
+    // 构造 Payload
     notification.payload = {
         "timestamp": Math.floor(Date.now() / 1000),
         "event": "update",
         "content-state": {
             "currentLevel": report.level,
             "levelColorName": getColorName(report.level),
-            "updateTimestamp": Math.floor(Date.now() / 1000) // 对应 Swift 的 Int 类型
+            "updateTimestamp": Math.floor(Date.now() / 1000)
         },
         "alert": {
             "title": `灾害更新：${report.title}`,
@@ -116,22 +118,41 @@ const sendLiveActivityUpdate = (token, report) => {
 
     console.log(`📡 准备双通道推送... (Token前6位: ${token.substring(0, 6)})`);
 
-    // 尝试 Sandbox 通道
-    apnProviderSandbox.send(notification, token).then(result => {
-        if (result.sent.length > 0) {
-            console.log("✅ [Sandbox通道] 推送成功！(开发环境)");
-        }
-    });
+    // --- 尝试 Sandbox 通道 ---
+    apnProviderSandbox.send(notification, token)
+        .then(result => {
+            if (result.sent.length > 0) {
+                console.log("✅ [Sandbox] 推送成功！(开发环境)");
+            } else if (result.failed.length > 0) {
+                const err = result.failed[0];
+                // 忽略 BadDeviceToken，因为这可能是生产环境 Token
+                if (err.response?.reason !== 'BadDeviceToken') {
+                    console.error("❌ [Sandbox] 业务失败:", JSON.stringify(err, null, 2));
+                }
+            }
+        })
+        .catch(err => {
+            console.error("🔥 [Sandbox] 网络/连接错误:", err.message);
+        });
 
-    // 尝试 Production 通道
-    apnProviderProduction.send(notification, token).then(result => {
-        if (result.sent.length > 0) {
-            console.log("✅ [Production通道] 推送成功！(生产环境)");
-        }
-    });
+    // --- 尝试 Production 通道 ---
+    apnProviderProduction.send(notification, token)
+        .then(result => {
+            if (result.sent.length > 0) {
+                console.log("✅ [Production] 推送成功！(生产环境)");
+            } else if (result.failed.length > 0) {
+                const err = result.failed[0];
+                // 忽略 BadDeviceToken，因为这可能是开发环境 Token
+                if (err.response?.reason !== 'BadDeviceToken') {
+                    console.error("❌ [Production] 业务失败:", JSON.stringify(err, null, 2));
+                }
+            }
+        })
+        .catch(err => {
+            console.error("🔥 [Production] 网络/连接错误:", err.message);
+        });
 };
 
-// 辅助：获取颜色名
 const getColorName = (level) => {
     if (level === '严重' || level === 'critical' || level === 'red') return 'red';
     if (level === '较重' || level === 'severe' || level === 'orange') return 'orange';
@@ -189,7 +210,6 @@ app.get('/api/reports', (req, res) => {
 app.post('/api/reports', (req, res) => {
     const db = readDb();
     const newId = req.body.id || uuidv4();
-    // 初始化 liveActivityToken 为 null
     const newReport = Object.assign({}, req.body, { id: newId, liveActivityToken: null });
     
     db.reports.unshift(newReport);
@@ -198,7 +218,7 @@ app.post('/api/reports', (req, res) => {
     res.status(201).json(newReport);
 });
 
-// --- ✅ 保存灵动岛 Token 接口 ---
+// --- 保存灵动岛 Token ---
 app.post('/api/live-activity/token', (req, res) => {
     const { reportId, token } = req.body;
     if (!reportId || !token) return res.status(400).json({ message: '参数缺失' });
@@ -209,7 +229,7 @@ app.post('/api/live-activity/token', (req, res) => {
     if (idx !== -1) {
         db.reports[idx].liveActivityToken = token;
         writeDb(db);
-        console.log(`💾 Token 已绑定到报告: ${reportId.substring(0,8)}...`);
+        console.log(`💾 Token 已绑定: ${reportId.substring(0,8)}...`);
         res.status(200).json({ message: 'Token保存成功' });
     } else {
         res.status(404).json({ message: '报告未找到' });
@@ -227,7 +247,7 @@ app.put('/api/reports/:id', (req, res) => {
         writeDb(db);
         console.log('🔄 报告已更新:', db.reports[idx].title);
 
-        // ✅ 如果有 Token，触发双通道推送
+        // 触发双通道推送
         if (updatedReport.liveActivityToken) {
             sendLiveActivityUpdate(updatedReport.liveActivityToken, updatedReport);
         }
@@ -244,7 +264,6 @@ app.delete('/api/reports/:id', (req, res) => {
     const newReports = db.reports.filter(r => r.id !== req.params.id);
 
     if (db.reports.length !== newReports.length) {
-        // 清理图片（可选逻辑）
         const report = db.reports.find(r => r.id === req.params.id);
         if (report && report.imagePath) {
             const imgPath = path.join(__dirname, report.imagePath);
@@ -262,7 +281,6 @@ app.delete('/api/reports/:id', (req, res) => {
 
 // MARK: - 8. 启动 HTTPS 服务器
 try {
-    // 证书路径配置
     const privateKey = fs.readFileSync('/root/ygkkkca/private.key', 'utf8');
     const certificate = fs.readFileSync('/root/ygkkkca/cert.crt', 'utf8');
     const credentials = { key: privateKey, cert: certificate };
@@ -276,6 +294,5 @@ try {
 
 } catch (error) {
     console.error('❌ HTTPS 启动失败:', error.message);
-    console.error('请检查 SSL 证书路径是否正确');
     process.exit(1);
 }
