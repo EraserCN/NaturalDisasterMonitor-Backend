@@ -15,7 +15,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DB_FILE_PATH = path.join(__dirname, 'db.json');
 const SALT_ROUNDS = 10;
-const BUNDLE_ID = 'com.ethanyi.NaturalDisasterMonitor';
+const BUNDLE_ID = 'org.eraser.NaturalDisasterMonitor';
 
 // MARK: - 2. APNs 双通道配置
 // 确保 'AuthKey_4P8H3V8HA4.p8' 文件在 server.js 同级目录下
