@@ -1,4 +1,4 @@
-// MARK: - 自然灾害报告后端服务 (apn库强制注入版)
+// MARK: - 自然灾害报告后端服务 (apn库 - 函数重写修复版)
 
 const express = require('express');
 const https = require('https');
@@ -30,7 +30,7 @@ const keysOptions = {
 const apnProviderSandbox = new apn.Provider({ ...keysOptions, production: false });
 const apnProviderProduction = new apn.Provider({ ...keysOptions, production: true });
 
-console.log("🚀 APNs 推送服务已初始化 (apn库 + 强制Header模式)");
+console.log("🚀 APNs 推送服务已初始化 (apn库修复版)");
 
 // MARK: - 3. 中间件
 app.use(cors());
@@ -72,25 +72,27 @@ const getColorName = (level) => {
     return 'yellow';
 };
 
-// MARK: - 6. 核心：双通道推送逻辑 (暴力修复 InvalidPushType)
+// MARK: - 6. 核心：双通道推送逻辑 (正确重写 headers 函数)
 const sendLiveActivityUpdate = (token, report) => {
     if (!token) return console.error("❌ Token 为空");
 
     const notification = new apn.Notification();
     
-    // ⚠️⚠️⚠️ 核心修改点：绕过 apn 库的检查，直接注入 Headers ⚠️⚠️⚠️
-    // apn 库太老不知道 liveactivity，我们必须手动写 headers 属性
-    notification.headers = {
-        "apns-push-type": "liveactivity", // 强行设置 push-type
-        "apns-priority": "10",
-        "apns-expiration": "0",
-        "apns-topic": `${BUNDLE_ID}.push-type.liveactivity` // 再次确认 Topic
+    // ⚠️⚠️⚠️ 核心修正：这里必须是一个【函数】，不能是对象 ⚠️⚠️⚠️
+    // 我们重写这个函数，让它返回我们需要的 Header
+    notification.headers = function() {
+        return {
+            "apns-priority": "10",
+            "apns-expiration": "0",
+            "apns-push-type": "liveactivity", // 这里是关键
+            "apns-topic": `${BUNDLE_ID}.push-type.liveactivity` // 再次确保 Topic 正确
+        };
     };
 
-    // 还是设置一下 topic 属性以防万一
+    // 依然设置 topic 属性配合库的逻辑
     notification.topic = `${BUNDLE_ID}.push-type.liveactivity`;
     
-    // 强制使用 rawPayload
+    // 强制使用 rawPayload 构造数据结构
     notification.rawPayload = {
         aps: {
             timestamp: Math.floor(Date.now() / 1000),
@@ -227,7 +229,7 @@ try {
     
     https.createServer({ key: privateKey, cert: certificate }, app).listen(PORT, () => {
         console.log(`✅ HTTPS 服务启动成功 (端口: ${PORT})`);
-        console.log(`✅ APNs (apn库 + Header修正) 就绪`);
+        console.log(`✅ APNs (apn库修复版) 就绪`);
     });
 } catch (error) {
     console.error('❌ HTTPS 启动失败:', error.message);
