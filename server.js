@@ -1,4 +1,4 @@
-// MARK: - 自然灾害报告后端服务 (旧版Node兼容修复版)
+// MARK: - 自然灾害报告后端服务 (apn库专用修复版)
 
 const express = require('express');
 const https = require('https');
@@ -8,7 +8,7 @@ const path = require('path');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcrypt');
-const apn = require('apn');
+const apn = require('apn'); // ✅ 坚持使用 apn 库
 
 // MARK: - 1. 初始化配置
 const app = express();
@@ -26,11 +26,11 @@ const keysOptions = {
     }
 };
 
-// 双通道初始化
-const apnProviderSandbox = new apn.Provider(Object.assign({}, keysOptions, { production: false }));
-const apnProviderProduction = new apn.Provider(Object.assign({}, keysOptions, { production: true }));
+// 双通道初始化 (apn 库)
+const apnProviderSandbox = new apn.Provider({ ...keysOptions, production: false });
+const apnProviderProduction = new apn.Provider({ ...keysOptions, production: true });
 
-console.log("🚀 APNs 推送服务已初始化 (双通道模式)");
+console.log("🚀 APNs 推送服务已初始化 (使用 apn 库)");
 
 // MARK: - 3. 中间件
 app.use(cors());
@@ -66,81 +66,82 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// MARK: - 补回缺失的辅助函数 (getColorName)
 const getColorName = (level) => {
-    if (level === '严重' || level === 'critical' || level === 'red') return 'red';
-    if (level === '较重' || level === 'severe' || level === 'orange') return 'orange';
+    if (['严重', 'critical', 'red'].includes(level)) return 'red';
+    if (['较重', 'severe', 'orange'].includes(level)) return 'orange';
     return 'yellow';
 };
 
-// MARK: - 6. 核心：双通道推送逻辑 (兼容写法)
+// MARK: - 6. 核心：双通道推送逻辑 (修复 InvalidPushType)
 const sendLiveActivityUpdate = (token, report) => {
-    if (!token) {
-        console.error("❌ [错误] 无法推送: Token 为空");
-        return;
-    }
+    if (!token) return console.error("❌ Token 为空");
 
     const notification = new apn.Notification();
+    
+    // ✅ 关键修复 1: 显式设置 pushType (解决 400 错误)
+    notification.pushType = "liveactivity"; 
+    
+    // ✅ 关键修复 2: Topic 必须带后缀
+    notification.topic = `${BUNDLE_ID}.push-type.liveactivity`;
+    
     notification.expiry = Math.floor(Date.now() / 1000) + 3600;
     notification.priority = 10;
-    notification.topic = BUNDLE_ID + '.push-type.liveactivity';
-    notification.pushType = "liveactivity";
-
-    notification.payload = {
-        "timestamp": Math.floor(Date.now() / 1000),
-        "event": "update",
-        "content-state": {
-            "currentLevel": report.level,
-            "levelColorName": getColorName(report.level),
-            "updateTimestamp": Math.floor(Date.now() / 1000)
-        },
-        "alert": {
-            "title": "灾害更新：" + report.title,
-            "body": "当前等级已变更为：" + report.level
-        },
-        "sound": "default"
+    
+    // ✅ 关键修复 3: 使用 rawPayload 强制覆盖结构
+    // apn 库默认结构不支持 content-state，必须这样写才能传进去
+    notification.rawPayload = {
+        aps: {
+            timestamp: Math.floor(Date.now() / 1000),
+            event: 'update',
+            'content-state': {
+                currentLevel: report.level,
+                levelColorName: getColorName(report.level),
+                updateTimestamp: Math.floor(Date.now() / 1000)
+            },
+            alert: {
+                title: `灾害更新：${report.title}`,
+                body: `当前等级已变更为：${report.level}`
+            },
+            sound: 'default'
+        }
     };
 
-    console.log("📡 正在尝试双通道推送... (Token: " + token.substring(0, 6) + "...)");
+    console.log(`📡 正在尝试双通道推送... (Token: ${token.substring(0, 6)}...)`);
 
     // --- Sandbox 通道 ---
-    console.log("   -> [Sandbox] 发起请求...");
     apnProviderSandbox.send(notification, token)
-        .then(function(result) {
+        .then(result => {
             if (result.sent.length > 0) {
                 console.log("✅ [Sandbox] 推送成功！");
             } else if (result.failed.length > 0) {
                 const failure = result.failed[0];
-                // ✅ 修复点：改用老式写法兼容旧 Node.js
-                if (failure.response && failure.response.reason !== 'BadDeviceToken') {
-                    console.error("❌ [Sandbox] 业务报错:", JSON.stringify(failure, null, 2));
+                if (failure.response?.reason !== 'BadDeviceToken') {
+                    console.error("❌ [Sandbox] 失败:", JSON.stringify(failure, null, 2));
                 }
             }
         })
-        .catch(function(err) { console.error("🔥 [Sandbox] 连接/证书错误:", err.message); });
+        .catch(err => console.error("🔥 [Sandbox] 错误:", err.message));
 
     // --- Production 通道 ---
-    console.log("   -> [Production] 发起请求...");
     apnProviderProduction.send(notification, token)
-        .then(function(result) {
+        .then(result => {
             if (result.sent.length > 0) {
                 console.log("✅ [Production] 推送成功！");
             } else if (result.failed.length > 0) {
                 const failure = result.failed[0];
-                // ✅ 修复点：改用老式写法兼容旧 Node.js
-                if (failure.response && failure.response.reason !== 'BadDeviceToken') {
-                    console.error("❌ [Production] 业务报错:", JSON.stringify(failure, null, 2));
+                if (failure.response?.reason !== 'BadDeviceToken') {
+                    console.error("❌ [Production] 失败:", JSON.stringify(failure, null, 2));
                 }
             }
         })
-        .catch(function(err) { console.error("🔥 [Production] 连接/证书错误:", err.message); });
+        .catch(err => console.error("🔥 [Production] 错误:", err.message));
 };
 
 // MARK: - 7. API 路由
 app.post('/api/register', async (req, res) => {
     const { username, password } = req.body;
     const db = readDb();
-    if (db.users.find(function(u) { return u.username === username; })) return res.status(409).json({ message: 'Exist' });
+    if (db.users.find(u => u.username === username)) return res.status(409).json({ message: 'Exist' });
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
     const newUser = { id: uuidv4(), username, passwordHash };
     db.users.push(newUser);
@@ -151,49 +152,47 @@ app.post('/api/register', async (req, res) => {
 app.post('/login', async (req, res) => {
     const { username, password } = req.body;
     const db = readDb();
-    const user = db.users.find(function(u) { return u.username === username; });
+    const user = db.users.find(u => u.username === username);
     if (user && await bcrypt.compare(password, user.passwordHash)) res.status(200).json({ message: 'OK' });
     else res.status(401).json({ message: 'Fail' });
 });
 
 app.post('/api/upload', upload.single('image'), (req, res) => {
     if (!req.file) return res.status(400).json({ message: 'No file' });
-    res.status(201).json({ filePath: '/uploads/' + req.file.filename });
+    res.status(201).json({ filePath: `/uploads/${req.file.filename}` });
 });
 
-app.get('/api/reports', (req, res) => { res.status(200).json(readDb().reports); });
+app.get('/api/reports', (req, res) => res.status(200).json(readDb().reports));
 
 app.post('/api/reports', (req, res) => {
     const db = readDb();
-    const newReport = Object.assign({}, req.body, { id: req.body.id || uuidv4(), liveActivityToken: null });
+    const newReport = { ...req.body, id: req.body.id || uuidv4(), liveActivityToken: null };
     db.reports.unshift(newReport);
     writeDb(db);
     console.log('📝 新报告:', newReport.title);
     res.status(201).json(newReport);
 });
 
-// 保存 Token
 app.post('/api/live-activity/token', (req, res) => {
     const { reportId, token } = req.body;
     if (!reportId || !token) return res.status(400).json({ message: 'Missing args' });
     const db = readDb();
-    const idx = db.reports.findIndex(function(r) { return r.id === reportId; });
+    const idx = db.reports.findIndex(r => r.id === reportId);
     if (idx !== -1) {
         db.reports[idx].liveActivityToken = token;
         writeDb(db);
-        console.log("💾 Token 保存成功: " + token.substring(0, 6) + "...");
+        console.log(`💾 Token 已保存: ${token.substring(0,6)}...`);
         res.status(200).json({ message: 'Saved' });
     } else {
         res.status(404).json({ message: 'Report not found' });
     }
 });
 
-// 更新报告
 app.put('/api/reports/:id', (req, res) => {
     const db = readDb();
-    const idx = db.reports.findIndex(function(r) { return r.id === req.params.id; });
+    const idx = db.reports.findIndex(r => r.id === req.params.id);
     if (idx !== -1) {
-        const updatedReport = Object.assign({}, db.reports[idx], req.body);
+        const updatedReport = { ...db.reports[idx], ...req.body };
         db.reports[idx] = updatedReport;
         writeDb(db);
         console.log('🔄 报告更新:', updatedReport.title);
@@ -209,7 +208,7 @@ app.put('/api/reports/:id', (req, res) => {
 
 app.delete('/api/reports/:id', (req, res) => {
     const db = readDb();
-    const newReports = db.reports.filter(function(r) { return r.id !== req.params.id; });
+    const newReports = db.reports.filter(r => r.id !== req.params.id);
     if (db.reports.length !== newReports.length) {
         db.reports = newReports;
         writeDb(db);
@@ -224,15 +223,10 @@ try {
     const privateKey = fs.readFileSync('/root/ygkkkca/private.key', 'utf8');
     const certificate = fs.readFileSync('/root/ygkkkca/cert.crt', 'utf8');
     
-    const credentials = { key: privateKey, cert: certificate };
-
-    const httpsServer = https.createServer(credentials, app);
-
-    httpsServer.listen(PORT, () => {
-        console.log("✅ HTTPS 服务已启动 (端口: " + PORT + ")");
-        console.log("✅ APNs 双通道就绪");
+    https.createServer({ key: privateKey, cert: certificate }, app).listen(PORT, () => {
+        console.log(`✅ HTTPS 服务启动成功 (端口: ${PORT})`);
+        console.log(`✅ APNs (apn库) 就绪`);
     });
-
 } catch (error) {
     console.error('❌ HTTPS 启动失败:', error.message);
     process.exit(1);
