@@ -15,7 +15,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DB_FILE_PATH = path.join(__dirname, 'db.json');
 const SALT_ROUNDS = 10;
-const BUNDLE_ID = 'com.ethanyi.NaturalDisasterMonitor';
+const BUNDLE_ID = 'org.eraser.NaturalDisasterMonitor';
 
 // MARK: - 2. APNs 双通道配置
 const keysOptions = {
