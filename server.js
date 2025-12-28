@@ -1,4 +1,4 @@
-// MARK: - 自然灾害报告后端服务 (apn库专用修复版)
+// MARK: - 自然灾害报告后端服务 (apn库强制注入版)
 
 const express = require('express');
 const https = require('https');
@@ -8,7 +8,7 @@ const path = require('path');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcrypt');
-const apn = require('apn'); // ✅ 坚持使用 apn 库
+const apn = require('apn'); 
 
 // MARK: - 1. 初始化配置
 const app = express();
@@ -26,11 +26,11 @@ const keysOptions = {
     }
 };
 
-// 双通道初始化 (apn 库)
+// 双通道初始化
 const apnProviderSandbox = new apn.Provider({ ...keysOptions, production: false });
 const apnProviderProduction = new apn.Provider({ ...keysOptions, production: true });
 
-console.log("🚀 APNs 推送服务已初始化 (使用 apn 库)");
+console.log("🚀 APNs 推送服务已初始化 (apn库 + 强制Header模式)");
 
 // MARK: - 3. 中间件
 app.use(cors());
@@ -72,23 +72,25 @@ const getColorName = (level) => {
     return 'yellow';
 };
 
-// MARK: - 6. 核心：双通道推送逻辑 (修复 InvalidPushType)
+// MARK: - 6. 核心：双通道推送逻辑 (暴力修复 InvalidPushType)
 const sendLiveActivityUpdate = (token, report) => {
     if (!token) return console.error("❌ Token 为空");
 
     const notification = new apn.Notification();
     
-    // ✅ 关键修复 1: 显式设置 pushType (解决 400 错误)
-    notification.pushType = "liveactivity"; 
-    
-    // ✅ 关键修复 2: Topic 必须带后缀
+    // ⚠️⚠️⚠️ 核心修改点：绕过 apn 库的检查，直接注入 Headers ⚠️⚠️⚠️
+    // apn 库太老不知道 liveactivity，我们必须手动写 headers 属性
+    notification.headers = {
+        "apns-push-type": "liveactivity", // 强行设置 push-type
+        "apns-priority": "10",
+        "apns-expiration": "0",
+        "apns-topic": `${BUNDLE_ID}.push-type.liveactivity` // 再次确认 Topic
+    };
+
+    // 还是设置一下 topic 属性以防万一
     notification.topic = `${BUNDLE_ID}.push-type.liveactivity`;
     
-    notification.expiry = Math.floor(Date.now() / 1000) + 3600;
-    notification.priority = 10;
-    
-    // ✅ 关键修复 3: 使用 rawPayload 强制覆盖结构
-    // apn 库默认结构不支持 content-state，必须这样写才能传进去
+    // 强制使用 rawPayload
     notification.rawPayload = {
         aps: {
             timestamp: Math.floor(Date.now() / 1000),
@@ -225,7 +227,7 @@ try {
     
     https.createServer({ key: privateKey, cert: certificate }, app).listen(PORT, () => {
         console.log(`✅ HTTPS 服务启动成功 (端口: ${PORT})`);
-        console.log(`✅ APNs (apn库) 就绪`);
+        console.log(`✅ APNs (apn库 + Header修正) 就绪`);
     });
 } catch (error) {
     console.error('❌ HTTPS 启动失败:', error.message);
