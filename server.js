@@ -67,9 +67,12 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// MARK: - 6. 核心：双通道推送逻辑
+// MARK: - 6. 核心：双通道推送逻辑 (含详细错误捕获)
 const sendLiveActivityUpdate = (token, report) => {
-    if (!token) return;
+    if (!token) {
+        console.error("❌ [错误] 无法推送: Token 为空");
+        return;
+    }
 
     const notification = new apn.Notification();
     notification.expiry = Math.floor(Date.now() / 1000) + 3600;
@@ -94,19 +97,46 @@ const sendLiveActivityUpdate = (token, report) => {
 
     console.log(`📡 正在尝试双通道推送... (Token: ${token.substring(0, 6)}...)`);
 
-    apnProviderSandbox.send(notification, token).then(result => {
-        if (result.sent.length > 0) console.log("✅ [Sandbox] 推送成功！");
-    });
+    // --- 尝试 Sandbox 通道 ---
+    console.log("   -> [Sandbox] 发起请求...");
+    apnProviderSandbox.send(notification, token)
+        .then(result => {
+            if (result.sent.length > 0) {
+                console.log("✅ [Sandbox] 推送成功！");
+            } else if (result.failed.length > 0) {
+                // 打印失败详情
+                const failure = result.failed[0];
+                if (failure.response && failure.response.reason === 'BadDeviceToken') {
+                    // console.log("⚠️ [Sandbox] BadDeviceToken (这是正常的，说明是生产环境Token)");
+                } else {
+                    console.error("❌ [Sandbox] 业务报错:", JSON.stringify(failure, null, 2));
+                }
+            }
+        })
+        .catch(err => {
+            // 🔥 这里是关键，之前卡住就是因为没捕获这个
+            console.error("🔥 [Sandbox] 连接/证书严重错误:", err);
+        });
 
-    apnProviderProduction.send(notification, token).then(result => {
-        if (result.sent.length > 0) console.log("✅ [Production] 推送成功！");
-    });
-};
-
-const getColorName = (level) => {
-    if (level === '严重' || level === 'critical' || level === 'red') return 'red';
-    if (level === '较重' || level === 'severe' || level === 'orange') return 'orange';
-    return 'yellow';
+    // --- 尝试 Production 通道 ---
+    console.log("   -> [Production] 发起请求...");
+    apnProviderProduction.send(notification, token)
+        .then(result => {
+            if (result.sent.length > 0) {
+                console.log("✅ [Production] 推送成功！");
+            } else if (result.failed.length > 0) {
+                const failure = result.failed[0];
+                if (failure.response && failure.response.reason === 'BadDeviceToken') {
+                    // console.log("⚠️ [Production] BadDeviceToken (这是正常的，说明是开发环境Token)");
+                } else {
+                    console.error("❌ [Production] 业务报错:", JSON.stringify(failure, null, 2));
+                }
+            }
+        })
+        .catch(err => {
+            // 🔥 这里是关键
+            console.error("🔥 [Production] 连接/证书严重错误:", err);
+        });
 };
 
 // MARK: - 7. API 路由
