@@ -1,4 +1,4 @@
-// MARK: - 自然灾害报告后端服务 (apn库 - 函数重写修复版)
+// MARK: - 自然灾害报告后端服务 (最终完美版: 颜色修正 + 详细日志 + Header修复)
 
 const express = require('express');
 const https = require('https');
@@ -30,7 +30,7 @@ const keysOptions = {
 const apnProviderSandbox = new apn.Provider({ ...keysOptions, production: false });
 const apnProviderProduction = new apn.Provider({ ...keysOptions, production: true });
 
-console.log("🚀 APNs 推送服务已初始化 (apn库修复版)");
+console.log("🚀 APNs 推送服务已初始化 (最终版)");
 
 // MARK: - 3. 中间件
 app.use(cors());
@@ -66,51 +66,52 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
+// MARK: - ✅ 颜色逻辑修正 (一般=黄, 严重=橙, 特别严重=红)
 const getColorName = (level) => {
-    // 1. 🟥 特别严重 (Critical) -> 红色
-    // 必须放在最前面判断
-    if (level === '特别严重' || level === 'critical' || level === 'red') {
+    if (!level) return 'yellow'; // 防止空值报错
+    
+    // 转换为字符串并判断
+    const l = String(level);
+
+    // 1. 🟥 特别严重
+    if (l === '特别严重' || l === 'critical' || l === 'red') {
         return 'red';
     }
 
-    // 2. 🟧 严重 (Severe) -> 橙色
-    // 之前的代码可能把“严重”错判成了红色，现在修正为橙色
-    if (level === '严重' || level === 'severe' || level === 'orange' || level === '较重') {
+    // 2. 🟧 严重 (包含 '严重', '较重', 'orange', 'severe')
+    if (l === '严重' || l === 'severe' || l === 'orange' || l === '较重') {
         return 'orange';
     }
 
-    // 3. 🟨 一般/其他 (Normal) -> 黄色
-    // 剩下的都默认黄色
+    // 3. 🟨 一般/默认
     return 'yellow';
 };
 
-// MARK: - 6. 核心：双通道推送逻辑 (正确重写 headers 函数)
+// MARK: - 6. 核心：双通道推送逻辑
 const sendLiveActivityUpdate = (token, report) => {
     if (!token) return console.error("❌ Token 为空");
 
     const notification = new apn.Notification();
     
-    // ⚠️⚠️⚠️ 核心修正：这里必须是一个【函数】，不能是对象 ⚠️⚠️⚠️
-    // 我们重写这个函数，让它返回我们需要的 Header
+    // ✅ 修复 TypeError: headers 必须是函数
     notification.headers = function() {
         return {
             "apns-priority": "10",
             "apns-expiration": "0",
-            "apns-push-type": "liveactivity", // 这里是关键
-            "apns-topic": `${BUNDLE_ID}.push-type.liveactivity` // 再次确保 Topic 正确
+            "apns-push-type": "liveactivity",
+            "apns-topic": `${BUNDLE_ID}.push-type.liveactivity`
         };
     };
 
-    // 依然设置 topic 属性配合库的逻辑
     notification.topic = `${BUNDLE_ID}.push-type.liveactivity`;
     
-    // 强制使用 rawPayload 构造数据结构
+    // ✅ 构造数据 (强制使用 rawPayload)
     notification.rawPayload = {
         aps: {
             timestamp: Math.floor(Date.now() / 1000),
             event: 'update',
             'content-state': {
-                currentLevel: report.level,
+                currentLevel: report.level || "未知", // 防止空值
                 levelColorName: getColorName(report.level),
                 updateTimestamp: Math.floor(Date.now() / 1000)
             },
@@ -122,7 +123,12 @@ const sendLiveActivityUpdate = (token, report) => {
         }
     };
 
-    console.log(`📡 正在尝试双通道推送... (Token: ${token.substring(0, 6)}...)`);
+    // 🔍 打印即将发送的数据 (关键调试信息)
+    console.log("---------------------------------------------------");
+    console.log(`📡 准备推送 (Token: ${token.substring(0, 6)}...)`);
+    console.log("📦 Payload 内容检查:");
+    console.log(JSON.stringify(notification.rawPayload, null, 2));
+    console.log("---------------------------------------------------");
 
     // --- Sandbox 通道 ---
     apnProviderSandbox.send(notification, token)
@@ -241,7 +247,7 @@ try {
     
     https.createServer({ key: privateKey, cert: certificate }, app).listen(PORT, () => {
         console.log(`✅ HTTPS 服务启动成功 (端口: ${PORT})`);
-        console.log(`✅ APNs (apn库修复版) 就绪`);
+        console.log(`✅ APNs 最终版就绪 (支持颜色修正 + 日志)`);
     });
 } catch (error) {
     console.error('❌ HTTPS 启动失败:', error.message);
