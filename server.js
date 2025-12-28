@@ -67,8 +67,20 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 const getColorName = (level) => {
-    if (['严重', 'critical', 'red'].includes(level)) return 'red';
-    if (['较重', 'severe', 'orange'].includes(level)) return 'orange';
+    // 1. 🟥 特别严重 (Critical) -> 红色
+    // 必须放在最前面判断
+    if (level === '特别严重' || level === 'critical' || level === 'red') {
+        return 'red';
+    }
+
+    // 2. 🟧 严重 (Severe) -> 橙色
+    // 之前的代码可能把“严重”错判成了红色，现在修正为橙色
+    if (level === '严重' || level === 'severe' || level === 'orange' || level === '较重') {
+        return 'orange';
+    }
+
+    // 3. 🟨 一般/其他 (Normal) -> 黄色
+    // 剩下的都默认黄色
     return 'yellow';
 };
 
