@@ -1,4 +1,4 @@
-// MARK: - 自然灾害报告后端服务 (HTTPS + 双通道APNs推送 + 自动纠错)
+// MARK: - 自然灾害报告后端服务 (HTTPS + 双通道APNs推送 + 路径修正版)
 
 const express = require('express');
 const https = require('https');
@@ -15,12 +15,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DB_FILE_PATH = path.join(__dirname, 'db.json');
 const SALT_ROUNDS = 10;
+const BUNDLE_ID = 'com.ethanyi.NaturalDisasterMonitor';
 
-// ⚠️⚠️⚠️ 请仔细核对：必须是主 App 的 Bundle ID ⚠️⚠️⚠️
-const BUNDLE_ID = 'org.eraser.NaturalDisasterMonitor';
-
-// MARK: - 2. APNs 双通道配置 (解决 BadDeviceToken 的终极方案)
-// 确保 'AuthKey_4P8H3V8HA4.p8' 文件放在和 server.js 同一级目录下
+// MARK: - 2. APNs 双通道配置
+// 确保 'AuthKey_4P8H3V8HA4.p8' 文件在 server.js 同级目录下
 const keysOptions = {
     token: {
         key: path.join(__dirname, 'AuthKey_4P8H3V8HA4.p8'),
@@ -29,19 +27,11 @@ const keysOptions = {
     }
 };
 
-// 通道 A: 开发环境 (Sandbox) -> 对应 Xcode 直接运行
-const apnProviderSandbox = new apn.Provider({
-    ...keysOptions,
-    production: false
-});
+// 双通道初始化
+const apnProviderSandbox = new apn.Provider({ ...keysOptions, production: false });
+const apnProviderProduction = new apn.Provider({ ...keysOptions, production: true });
 
-// 通道 B: 生产环境 (Production) -> 对应 TestFlight / 打包安装
-const apnProviderProduction = new apn.Provider({
-    ...keysOptions,
-    production: true
-});
-
-console.log("🚀 APNs 推送服务已初始化 (双通道模式: Sandbox + Production)");
+console.log("🚀 APNs 推送服务已初始化 (双通道模式)");
 
 // MARK: - 3. 中间件
 app.use(cors());
@@ -61,9 +51,7 @@ const readDb = () => {
             return initialDb;
         }
         return JSON.parse(fs.readFileSync(DB_FILE_PATH));
-    } catch (error) {
-        return { users: [], reports: [] };
-    }
+    } catch (error) { return { users: [], reports: [] }; }
 };
 
 const writeDb = (db) => {
@@ -106,30 +94,12 @@ const sendLiveActivityUpdate = (token, report) => {
 
     console.log(`📡 正在尝试双通道推送... (Token: ${token.substring(0, 6)}...)`);
 
-    // --- 尝试 Sandbox ---
     apnProviderSandbox.send(notification, token).then(result => {
-        if (result.sent.length > 0) {
-            console.log("✅ [Sandbox] 推送成功！(开发环境)");
-        } else if (result.failed.length > 0) {
-            // 如果是 BadDeviceToken，说明这个Token可能属于生产环境，忽略报错
-            const reason = result.failed[0].response?.reason;
-            if (reason !== 'BadDeviceToken') {
-                console.log(`⚠️ [Sandbox] 失败: ${reason}`);
-            }
-        }
+        if (result.sent.length > 0) console.log("✅ [Sandbox] 推送成功！");
     });
 
-    // --- 尝试 Production ---
     apnProviderProduction.send(notification, token).then(result => {
-        if (result.sent.length > 0) {
-            console.log("✅ [Production] 推送成功！(生产环境)");
-        } else if (result.failed.length > 0) {
-            // 如果是 BadDeviceToken，说明这个Token可能属于开发环境，忽略报错
-            const reason = result.failed[0].response?.reason;
-            if (reason !== 'BadDeviceToken') {
-                console.log(`⚠️ [Production] 失败: ${reason}`);
-            }
-        }
+        if (result.sent.length > 0) console.log("✅ [Production] 推送成功！");
     });
 };
 
@@ -139,8 +109,7 @@ const getColorName = (level) => {
     return 'yellow';
 };
 
-// MARK: - 7. API 路由 (保持不变)
-
+// MARK: - 7. API 路由
 app.post('/api/register', async (req, res) => {
     const { username, password } = req.body;
     const db = readDb();
@@ -192,7 +161,7 @@ app.post('/api/live-activity/token', (req, res) => {
     }
 });
 
-// 更新报告并推送
+// 更新报告
 app.put('/api/reports/:id', (req, res) => {
     const db = readDb();
     const idx = db.reports.findIndex(r => r.id === req.params.id);
@@ -223,14 +192,22 @@ app.delete('/api/reports/:id', (req, res) => {
     }
 });
 
-// MARK: - 8. 启动 HTTPS
+// MARK: - 8. 启动 HTTPS (关键修正点)
 try {
+    // 👇👇👇 使用你提供的原路径 👇👇👇
     const privateKey = fs.readFileSync('/root/ygkkkca/private.key', 'utf8');
     const certificate = fs.readFileSync('/root/ygkkkca/cert.crt', 'utf8');
-    https.createServer({ key: privateKey, cert: certificate }, app).listen(PORT, () => {
-        console.log(`✅ HTTPS 启动成功 (端口 ${PORT})`);
-        console.log(`✅ 双通道推送就绪 (Sandbox + Production)`);
+    
+    const credentials = { key: privateKey, cert: certificate };
+
+    const httpsServer = https.createServer(credentials, app);
+
+    httpsServer.listen(PORT, () => {
+        console.log(`✅ HTTPS 服务已恢复 (端口: ${PORT})`);
+        console.log(`✅ APNs 双通道就绪`);
     });
+
 } catch (error) {
-    console.error('HTTPS Error:', error.message);
+    console.error('❌ HTTPS 启动失败:', error.message);
+    process.exit(1);
 }
