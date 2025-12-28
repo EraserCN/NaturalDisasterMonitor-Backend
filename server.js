@@ -1,4 +1,4 @@
-// MARK: - 自然灾害报告后端服务 (HTTPS + 双通道APNs推送 + 路径修正版)
+// MARK: - 自然灾害报告后端服务 (最终修复版)
 
 const express = require('express');
 const https = require('https');
@@ -18,7 +18,6 @@ const SALT_ROUNDS = 10;
 const BUNDLE_ID = 'org.eraser.NaturalDisasterMonitor';
 
 // MARK: - 2. APNs 双通道配置
-// 确保 'AuthKey_4P8H3V8HA4.p8' 文件在 server.js 同级目录下
 const keysOptions = {
     token: {
         key: path.join(__dirname, 'AuthKey_4P8H3V8HA4.p8'),
@@ -67,7 +66,14 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// MARK: - 6. 核心：双通道推送逻辑 (含详细错误捕获)
+// MARK: - ✅ 补回缺失的辅助函数 (getColorName)
+const getColorName = (level) => {
+    if (level === '严重' || level === 'critical' || level === 'red') return 'red';
+    if (level === '较重' || level === 'severe' || level === 'orange') return 'orange';
+    return 'yellow';
+};
+
+// MARK: - 6. 核心：双通道推送逻辑 (含详细日志)
 const sendLiveActivityUpdate = (token, report) => {
     if (!token) {
         console.error("❌ [错误] 无法推送: Token 为空");
@@ -85,7 +91,7 @@ const sendLiveActivityUpdate = (token, report) => {
         "event": "update",
         "content-state": {
             "currentLevel": report.level,
-            "levelColorName": getColorName(report.level),
+            "levelColorName": getColorName(report.level), // ✅ 现在这里不会报错了
             "updateTimestamp": Math.floor(Date.now() / 1000)
         },
         "alert": {
@@ -97,28 +103,22 @@ const sendLiveActivityUpdate = (token, report) => {
 
     console.log(`📡 正在尝试双通道推送... (Token: ${token.substring(0, 6)}...)`);
 
-    // --- 尝试 Sandbox 通道 ---
+    // --- Sandbox 通道 ---
     console.log("   -> [Sandbox] 发起请求...");
     apnProviderSandbox.send(notification, token)
         .then(result => {
             if (result.sent.length > 0) {
                 console.log("✅ [Sandbox] 推送成功！");
             } else if (result.failed.length > 0) {
-                // 打印失败详情
                 const failure = result.failed[0];
-                if (failure.response && failure.response.reason === 'BadDeviceToken') {
-                    // console.log("⚠️ [Sandbox] BadDeviceToken (这是正常的，说明是生产环境Token)");
-                } else {
+                if (failure.response?.reason !== 'BadDeviceToken') {
                     console.error("❌ [Sandbox] 业务报错:", JSON.stringify(failure, null, 2));
                 }
             }
         })
-        .catch(err => {
-            // 🔥 这里是关键，之前卡住就是因为没捕获这个
-            console.error("🔥 [Sandbox] 连接/证书严重错误:", err);
-        });
+        .catch(err => console.error("🔥 [Sandbox] 连接/证书错误:", err.message));
 
-    // --- 尝试 Production 通道 ---
+    // --- Production 通道 ---
     console.log("   -> [Production] 发起请求...");
     apnProviderProduction.send(notification, token)
         .then(result => {
@@ -126,17 +126,12 @@ const sendLiveActivityUpdate = (token, report) => {
                 console.log("✅ [Production] 推送成功！");
             } else if (result.failed.length > 0) {
                 const failure = result.failed[0];
-                if (failure.response && failure.response.reason === 'BadDeviceToken') {
-                    // console.log("⚠️ [Production] BadDeviceToken (这是正常的，说明是开发环境Token)");
-                } else {
+                if (failure.response?.reason !== 'BadDeviceToken') {
                     console.error("❌ [Production] 业务报错:", JSON.stringify(failure, null, 2));
                 }
             }
         })
-        .catch(err => {
-            // 🔥 这里是关键
-            console.error("🔥 [Production] 连接/证书严重错误:", err);
-        });
+        .catch(err => console.error("🔥 [Production] 连接/证书错误:", err.message));
 };
 
 // MARK: - 7. API 路由
@@ -222,9 +217,8 @@ app.delete('/api/reports/:id', (req, res) => {
     }
 });
 
-// MARK: - 8. 启动 HTTPS (关键修正点)
+// MARK: - 8. 启动 HTTPS (使用你确认正确的路径)
 try {
-    // 👇👇👇 使用你提供的原路径 👇👇👇
     const privateKey = fs.readFileSync('/root/ygkkkca/private.key', 'utf8');
     const certificate = fs.readFileSync('/root/ygkkkca/cert.crt', 'utf8');
     
@@ -233,7 +227,7 @@ try {
     const httpsServer = https.createServer(credentials, app);
 
     httpsServer.listen(PORT, () => {
-        console.log(`✅ HTTPS 服务已恢复 (端口: ${PORT})`);
+        console.log(`✅ HTTPS 服务已启动 (端口: ${PORT})`);
         console.log(`✅ APNs 双通道就绪`);
     });
 
