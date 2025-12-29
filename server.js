@@ -1,4 +1,4 @@
-// MARK: - 自然灾害报告后端服务 (最终完美版: 颜色修正 + 详细日志 + Header修复)
+// MARK: - 自然灾害报告后端服务 (最终完整版: JWT 验证 + 完整业务逻辑)
 
 const express = require('express');
 const https = require('https');
@@ -9,6 +9,7 @@ const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcrypt');
 const apn = require('apn'); 
+const jwt = require('jsonwebtoken'); // 🆕 引入 JWT 库
 
 // MARK: - 1. 初始化配置
 const app = express();
@@ -16,6 +17,7 @@ const PORT = process.env.PORT || 3000;
 const DB_FILE_PATH = path.join(__dirname, 'db.json');
 const SALT_ROUNDS = 10;
 const BUNDLE_ID = 'org.eraser.NaturalDisasterMonitor';
+const JWT_SECRET = 'Super_Secret_Key_Change_This_123'; // 🔒 JWT 密钥 (生产环境请修改)
 
 // MARK: - 2. APNs 双通道配置
 const keysOptions = {
@@ -30,16 +32,38 @@ const keysOptions = {
 const apnProviderSandbox = new apn.Provider({ ...keysOptions, production: false });
 const apnProviderProduction = new apn.Provider({ ...keysOptions, production: true });
 
-console.log("🚀 APNs 推送服务已初始化 (最终版)");
+console.log("🚀 APNs 推送服务已初始化 (JWT验证版)");
 
 // MARK: - 3. 中间件
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// 托管静态文件 (确保 admin.html 能被访问)
+app.use(express.static(path.join(__dirname)));
 
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
+
+// MARK: - 🔒 身份验证中间件 (核心新增)
+const authenticateToken = (req, res, next) => {
+    // 1. 从请求头获取 token (格式: Bearer <token>)
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (token == null) {
+        return res.status(401).json({ message: '未授权：请先登录' }); // 没有 Token
+    }
+
+    // 2. 验证 Token
+    jwt.verify(token, JWT_SECRET, (err, user) => {
+        if (err) {
+            return res.status(403).json({ message: '禁止访问：Token 无效或已过期' }); // Token 无效
+        }
+        req.user = user; // 验证通过，将用户信息存入 req
+        next(); // 放行
+    });
+};
 
 // MARK: - 4. 数据库辅助
 const readDb = () => {
@@ -66,7 +90,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// MARK: - ✅ 颜色逻辑修正 (一般=黄, 严重=橙, 特别严重=红)
+// MARK: - ✅ 颜色逻辑修正
 const getColorName = (level) => {
     if (!level) return 'yellow'; // 防止空值报错
     
@@ -93,7 +117,6 @@ const sendLiveActivityUpdate = (token, report) => {
 
     const notification = new apn.Notification();
     
-    // ✅ 修复 TypeError: headers 必须是函数
     notification.headers = function() {
         return {
             "apns-priority": "10",
@@ -105,13 +128,12 @@ const sendLiveActivityUpdate = (token, report) => {
 
     notification.topic = `${BUNDLE_ID}.push-type.liveactivity`;
     
-    // ✅ 构造数据 (强制使用 rawPayload)
     notification.rawPayload = {
         aps: {
             timestamp: Math.floor(Date.now() / 1000),
             event: 'update',
             'content-state': {
-                currentLevel: report.level || "未知", // 防止空值
+                currentLevel: report.level || "未知", 
                 levelColorName: getColorName(report.level),
                 updateTimestamp: Math.floor(Date.now() / 1000)
             },
@@ -123,22 +145,15 @@ const sendLiveActivityUpdate = (token, report) => {
         }
     };
 
-    // 🔍 打印即将发送的数据 (关键调试信息)
-    console.log("---------------------------------------------------");
-    console.log(`📡 准备推送 (Token: ${token.substring(0, 6)}...)`);
-    console.log("📦 Payload 内容检查:");
-    console.log(JSON.stringify(notification.rawPayload, null, 2));
-    console.log("---------------------------------------------------");
-
     // --- Sandbox 通道 ---
     apnProviderSandbox.send(notification, token)
         .then(result => {
             if (result.sent.length > 0) {
                 console.log("✅ [Sandbox] 推送成功！");
             } else if (result.failed.length > 0) {
-                const failure = result.failed[0];
-                if (failure.response?.reason !== 'BadDeviceToken') {
-                    console.error("❌ [Sandbox] 失败:", JSON.stringify(failure, null, 2));
+                // 仅打印非 BadDeviceToken 错误
+                if (result.failed[0].response?.reason !== 'BadDeviceToken') {
+                    console.error("❌ [Sandbox] 失败:", JSON.stringify(result.failed[0], null, 2));
                 }
             }
         })
@@ -150,9 +165,8 @@ const sendLiveActivityUpdate = (token, report) => {
             if (result.sent.length > 0) {
                 console.log("✅ [Production] 推送成功！");
             } else if (result.failed.length > 0) {
-                const failure = result.failed[0];
-                if (failure.response?.reason !== 'BadDeviceToken') {
-                    console.error("❌ [Production] 失败:", JSON.stringify(failure, null, 2));
+                if (result.failed[0].response?.reason !== 'BadDeviceToken') {
+                    console.error("❌ [Production] 失败:", JSON.stringify(result.failed[0], null, 2));
                 }
             }
         })
@@ -160,24 +174,87 @@ const sendLiveActivityUpdate = (token, report) => {
 };
 
 // MARK: - 7. API 路由
-app.post('/api/register', async (req, res) => {
-    const { username, password } = req.body;
-    const db = readDb();
-    if (db.users.find(u => u.username === username)) return res.status(409).json({ message: 'Exist' });
-    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    const newUser = { id: uuidv4(), username, passwordHash };
-    db.users.push(newUser);
-    writeDb(db);
-    res.status(201).json({ userId: newUser.id });
-});
 
+// --- 🔓 登录接口 (升级版：返回 JWT Token) ---
 app.post('/login', async (req, res) => {
     const { username, password } = req.body;
     const db = readDb();
     const user = db.users.find(u => u.username === username);
-    if (user && await bcrypt.compare(password, user.passwordHash)) res.status(200).json({ message: 'OK' });
-    else res.status(401).json({ message: 'Fail' });
+    
+    if (user && await bcrypt.compare(password, user.passwordHash)) {
+        // 登录成功，生成 Token (有效期 24小时)
+        const token = jwt.sign(
+            { id: user.id, username: user.username }, 
+            JWT_SECRET, 
+            { expiresIn: '24h' }
+        );
+        res.status(200).json({ message: 'OK', token: token }); // ✅ 返回 Token
+    } else {
+        res.status(401).json({ message: 'Fail' });
+    }
 });
+
+// --- 🔒 用户管理接口 (已加锁：需要 authenticateToken) ---
+
+// 1. 获取用户列表
+app.get('/api/users', authenticateToken, (req, res) => {
+    const db = readDb();
+    const safeUsers = db.users.map(u => ({ id: u.id, username: u.username }));
+    res.status(200).json(safeUsers);
+});
+
+// 2. 删除用户
+app.delete('/api/users/:id', authenticateToken, (req, res) => {
+    const db = readDb();
+    const initialLength = db.users.length;
+    const newUsers = db.users.filter(u => u.id !== req.params.id);
+    
+    if (newUsers.length === initialLength) {
+        return res.status(404).json({ message: 'User not found' });
+    }
+    
+    db.users = newUsers;
+    writeDb(db);
+    res.status(200).json({ message: 'User deleted' });
+});
+
+// 3. 修改用户密码
+app.put('/api/users/:id', authenticateToken, async (req, res) => {
+    const { password } = req.body; // 目前只允许修改密码
+    if (!password) return res.status(400).json({ message: 'Password required' });
+
+    const db = readDb();
+    const userIndex = db.users.findIndex(u => u.id === req.params.id);
+
+    if (userIndex === -1) {
+        return res.status(404).json({ message: 'User not found' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+    db.users[userIndex].passwordHash = passwordHash;
+    
+    writeDb(db);
+    res.status(200).json({ message: 'Password updated' });
+});
+
+// --- 🔓 注册接口 (保持公开) ---
+app.post('/api/register', async (req, res) => {
+    const { username, password } = req.body;
+    if (!username || !password) return res.status(400).json({ message: 'Missing fields' });
+    
+    const db = readDb();
+    if (db.users.find(u => u.username === username)) return res.status(409).json({ message: 'Exist' });
+    
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+    const newUser = { id: uuidv4(), username, passwordHash };
+    db.users.push(newUser);
+    writeDb(db);
+    res.status(201).json({ userId: newUser.id, message: 'User created' });
+});
+
+// --- 🔓 灾害报告相关 API (保持原有业务逻辑) ---
+// 注意：为了不影响现有 App 的功能，灾害报告接口暂未加 authenticateToken。
+// 如果需要在 App 端也进行鉴权，请让 App 端登录后在 Header 带上 Token，然后在下面接口加 authenticateToken
 
 app.post('/api/upload', upload.single('image'), (req, res) => {
     if (!req.file) return res.status(400).json({ message: 'No file' });
@@ -219,6 +296,7 @@ app.put('/api/reports/:id', (req, res) => {
         writeDb(db);
         console.log('🔄 报告更新:', updatedReport.title);
         
+        // 触发 Live Activity 推送
         if (updatedReport.liveActivityToken) {
             sendLiveActivityUpdate(updatedReport.liveActivityToken, updatedReport);
         }
@@ -247,7 +325,7 @@ try {
     
     https.createServer({ key: privateKey, cert: certificate }, app).listen(PORT, () => {
         console.log(`✅ HTTPS 服务启动成功 (端口: ${PORT})`);
-        console.log(`✅ APNs 最终版就绪 (支持颜色修正 + 日志)`);
+        console.log(`🔒 JWT 验证已启用：访问 /api/users 相关接口需要 Token`);
     });
 } catch (error) {
     console.error('❌ HTTPS 启动失败:', error.message);
