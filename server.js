@@ -205,8 +205,9 @@ const sendLiveActivityUpdate = (token, report) => {
     };
 
     const handleResult = (source, promise) => {
-        promise.then(result => {
-            if (result.failed.length > 0 && result.failed[0].response?.reason !== 'BadDeviceToken') {
+        promise.then(result => {if (result.failed.length > 0 && 
+    result.failed[0].response && 
+    result.failed[0].response.reason !== 'BadDeviceToken') {
                 console.error(`❌ [${source}] 推送失败:`, JSON.stringify(result.failed[0], null, 2));
             } else if (result.sent.length > 0) {
                 console.log(`✅ [${source}] 推送成功`);
