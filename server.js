@@ -14,7 +14,7 @@ const Database = require('better-sqlite3'); // 🆕 引入 SQLite 驱动
 
 // MARK: - 1. 初始化配置
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 const SALT_ROUNDS = 10;
 const BUNDLE_ID = 'org.eraser.NaturalDisasterMonitor';
 const JWT_SECRET = 'Super_Secret_Key_Change_This_123'; // 🔒 JWT 密钥
