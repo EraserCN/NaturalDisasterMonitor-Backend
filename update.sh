@@ -86,7 +86,7 @@ fi
 
 # 后台启动服务
 echo "   启动新服务..."
-nohup node server.js > server.log 2>&1 &
+sudo nohup node server.js > server.log 2>&1 &
 
 echo "========================================="
 echo "✅ 更新完成！"
